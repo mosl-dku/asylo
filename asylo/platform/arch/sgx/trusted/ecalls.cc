@@ -27,6 +27,7 @@
 #include "asylo/enclave.pb.h"
 #include "asylo/util/logging.h"
 #include "asylo/platform/arch/include/trusted/host_calls.h"
+#include "asylo/platform/arch/include/trusted/fork.h"
 #include "asylo/platform/arch/sgx/trusted/generated_bridge_t.h"
 #include "asylo/platform/common/bridge_types.h"
 #include "asylo/platform/core/entry_points.h"
@@ -114,6 +115,7 @@ int ecall_transfer_secure_snapshot_key(const char *input,
 
 int ecall_initiate_migration() {
   int result = 0;
+  asylo::SetForkRequested();
 
   try {
 	result = asylo::__asylo_initiate_migration();

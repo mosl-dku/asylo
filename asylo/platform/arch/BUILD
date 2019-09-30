@@ -202,6 +202,7 @@ cc_library(
     hdrs = [
         "include/trusted/hardware_random.h",
         "include/trusted/host_calls.h",
+        "include/trusted/fork.h",
         "include/trusted/register_signal.h",
     ],
     copts = select(
@@ -218,6 +219,7 @@ cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":trusted_sgx_bridge",
+        ":fork_cc_proto",
         "//asylo:enclave_cc_proto",
         "//asylo/platform/common:bridge_proto_serializer",
         "//asylo/platform/common:bridge_types",
