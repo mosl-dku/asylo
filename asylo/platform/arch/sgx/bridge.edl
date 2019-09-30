@@ -351,12 +351,13 @@ enclave {
     void ocall_enc_untrusted__exit(int rc);
     pid_t ocall_enc_untrusted_fork(
         [in, string]const char *enclave_name,
-	[in, size = config_len] const char *config,
-	bridge_size_t config_len,
-	bool restore_snapshot)
-	allow(ecall_take_snapshot, ecall_restore) propagate_errno;
+	    [in, size = config_len] const char *config,
+	    bridge_size_t config_len,
+	    bool restore_snapshot)
+	    allow(ecall_take_snapshot, ecall_restore) propagate_errno;
 	int ocall_enc_untrusted_initiate_migration(
-	[in, string]const char* enclave_name) propagate_errno;
+	    [in, string]const char* enclave_name)
+	    allow(ecall_take_snapshot, ecall_restore) propagate_errno;
 
     //////////////////////////////////////
     //           utime.h                //

@@ -147,6 +147,16 @@ static Status transfer_secure_snapshot_key(sgx_enclave_id_t eid,
   return Status::OkStatus();
 }
 
+static Status initiate_migration(sgx_enclave_id_t eid) {
+  int result;
+  sgx_status_t sgx_status;
+  sgx_status = ecall_initiate_migration(eid, &result);
+  if (sgx_status != SGX_SUCCESS) {
+	return Status(sgx_status, "Call to ecall_initiate_migration failed");
+  }
+  return Status::OkStatus();
+}
+
 StatusOr<std::unique_ptr<EnclaveClient>> SgxLoader::LoadEnclave(
     const std::string &name, void *base_address, const size_t enclave_size,
     const EnclaveConfig &config) const {
@@ -302,19 +312,7 @@ Status SgxClient::EnterAndTransferSecureSnapshotKey(
 }
 
 Status SgxClient::InitiateMigration() {
-  int result = 0;
-  sgx_status_t sgx_status;
-
-  try {
-    sgx_status = ecall_initiate_migration(primitive_sgx_client_->GetEnclaveId(), &result);
-  } catch (...) {
-    LOG(FATAL) << "Uncaught exception in enclave";
-  }
-
-  if (sgx_status != SGX_SUCCESS) {
-	return Status(sgx_status, "Call to ecall_initiate_migration failed");
-  }
-  return Status::OkStatus();
+  return initiate_migration(primitive_sgx_client_->GetEnclaveId());
 }
 
 bool SgxClient::IsTcsActive() {

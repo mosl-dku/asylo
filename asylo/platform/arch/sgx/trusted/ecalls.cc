@@ -63,6 +63,7 @@ int ecall_take_snapshot(char **output, bridge_size_t *output_len) {
   int result = 0;
   size_t tmp_output_len;
   try {
+    LOG(INFO) << "ecall_take_snapshot";
     result =
         asylo::__asylo_take_snapshot(output, &tmp_output_len);
   } catch (...) {
@@ -115,6 +116,7 @@ int ecall_transfer_secure_snapshot_key(const char *input,
 
 int ecall_initiate_migration() {
   int result = 0;
+  asylo::SaveThreadLayoutForSnapshot();
   asylo::SetForkRequested();
 
   try {

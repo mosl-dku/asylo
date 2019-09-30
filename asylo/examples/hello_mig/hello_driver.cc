@@ -55,6 +55,8 @@ void mig_handler(int signo) {
 
   if (client != NULL) {
     //Take snapshot
+	//asylo::SnapshotLayout layout;
+    //asylo::Status status = client->EnterAndTakeSnapshot(&layout);
     asylo::Status status = client->InitiateMigration();
 	if (!status.ok()) {
 	  LOG(QFATAL) << "InitiateMigration failed";
