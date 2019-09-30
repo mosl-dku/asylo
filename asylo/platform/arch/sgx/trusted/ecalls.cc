@@ -119,12 +119,6 @@ int ecall_initiate_migration() {
   asylo::SaveThreadLayoutForSnapshot();
   asylo::SetForkRequested();
 
-  try {
-	result = asylo::__asylo_initiate_migration();
-  } catch (...)  {
-	LOG(FATAL) << "Uncaught exception in enclave";
-  }
-
   return result;
 }
 
