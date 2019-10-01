@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 #include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "absl/strings/str_split.h"
 #include "asylo/client.h"
@@ -45,6 +47,8 @@ struct sigaction new_sa;
 int hello(int, char** );
 int g_argc;
 char **g_argv;
+pid_t pid;
+int wstatus;
 
 void signal_handler(int signo)
 {
@@ -55,8 +59,37 @@ void signal_handler(int signo)
 	  LOG(QFATAL) << "Destroy " << FLAGS_enclave_path << " failed: " << status;
 	}
 	LOG_IF(INFO, status.ok()) << "FIN";*/
-	hello(g_argc, g_argv);
-	exit(0);
+
+	pid = fork();
+
+	if(pid < 0)
+	{
+		perror("fork error");
+	}
+	else if(pid == 0) //child
+	{
+		execl("/usr/sbin/service", "aesmd", "restart", 0);
+		exit(0);
+	}
+	else // parent
+	{
+		pid = fork();
+
+		if(pid < 0)
+		{
+			perror("fork error");
+		}
+		else if(pid == 0) //child
+		{
+			hello(g_argc, g_argv);
+			exit(0);
+		}
+		else // parent
+		{
+			waitpid(pid, &wstatus, NULL);
+			exit(0);
+		}
+	}
 }
 
 int main(int argc, char*argv[]){
