@@ -75,7 +75,6 @@ void mig_handler(int signo) {
   } else if (pid == 0) {
 	//child
 
-	asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
 	auto manager_result = asylo::EnclaveManager::Instance();
 	if (!manager_result.ok()) {
 		LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
@@ -97,10 +96,10 @@ void mig_handler(int signo) {
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
 
   // Part 1: Initialization
-  std::cout << "Loading " << absl::GetFlag(FLAGS_enclave_path) << std::endl;
-  asylo::SgxLoader loader(absl::GetFlag(FLAGS_enclave_path), /*debug=*/true);
+  std::cout << "ReLoading " << absl::GetFlag(FLAGS_enclave_path) << std::endl;
+  asylo::EnclaveLoader *loader = manager->GetLoaderFromClient(client);
   asylo::EnclaveConfig config = GetApplicationConfig();
-  asylo::Status status = manager->LoadEnclave("hello_enclave", loader, config, base, size);
+  asylo::Status status = manager->LoadEnclave("hello_enclave", *loader, config, base, size);
   if (!status.ok()) {
     LOG(QFATAL) << "Load " << absl::GetFlag(FLAGS_enclave_path)
                 << " failed: " << status;
