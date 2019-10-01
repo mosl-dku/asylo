@@ -40,14 +40,17 @@ ABSL_FLAG(std::string, enclave_path, "", "Path to enclave to load");
 ABSL_FLAG(std::string, names, "",
           "A comma-separated list of names to pass to the enclave");
 
-asylo::EnclaveConfig GetApplicationConfig();
-
+// some global var
 asylo::SgxClient *client;
 int g_argc;
 char **g_argv;
-void ReloadEnclave(void *base, size_t size);
+asylo::SnapshotLayout layout;
+
+// some func defs
+void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size);
 void ResumeExecution(asylo::EnclaveManager *manager);
 void Destroy(asylo::EnclaveManager *manager);
+asylo::EnclaveConfig GetApplicationConfig();
 
 // callback for SIGSNAPSHOT
 void mig_handler(int signo) {
@@ -55,7 +58,6 @@ void mig_handler(int signo) {
 
   if (client != NULL) {
     //Take snapshot
-	asylo::SnapshotLayout layout;
     asylo::Status status = client->InitiateMigration();
     status = client->EnterAndTakeSnapshot(&layout);
 	if (!status.ok()) {
@@ -73,9 +75,6 @@ void mig_handler(int signo) {
   } else if (pid == 0) {
 	//child
 
-	// now, reload enclave, then restore snapshot from migration
-	ReloadEnclave(base, size);
-
 	asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
 	auto manager_result = asylo::EnclaveManager::Instance();
 	if (!manager_result.ok()) {
@@ -83,6 +82,8 @@ void mig_handler(int signo) {
 	}
 	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
 
+	// now, reload enclave, then restore snapshot from migration
+	ReloadEnclave(manager, base, size);
 	ResumeExecution(manager);
 	Destroy(manager);
 	exit(0);
@@ -93,15 +94,9 @@ void mig_handler(int signo) {
   }
 }
 
-void ReloadEnclave(void *base, size_t size) {
+void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
 
   // Part 1: Initialization
-  asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
-  auto manager_result = asylo::EnclaveManager::Instance();
-  if (!manager_result.ok()) {
-    LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
-  }
-  asylo::EnclaveManager *manager = manager_result.ValueOrDie();
   std::cout << "Loading " << absl::GetFlag(FLAGS_enclave_path) << std::endl;
   asylo::SgxLoader loader(absl::GetFlag(FLAGS_enclave_path), /*debug=*/true);
   asylo::EnclaveConfig config = GetApplicationConfig();
@@ -109,6 +104,12 @@ void ReloadEnclave(void *base, size_t size) {
   if (!status.ok()) {
     LOG(QFATAL) << "Load " << absl::GetFlag(FLAGS_enclave_path)
                 << " failed: " << status;
+  }
+  if (client != NULL) {
+    status = client->EnterAndRestore(layout);
+    if (!status.ok()) {
+		LOG(QFATAL) << "EnterAndRestore failed";
+    }
   }
 
 }

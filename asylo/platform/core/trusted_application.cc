@@ -589,7 +589,6 @@ int __asylo_take_snapshot(char **output, size_t *output_len) {
   asylo::StatusOr<const asylo::EnclaveConfig *> config_result =
       asylo::GetEnclaveConfig();
 
-  LOG(INFO) << "__asylo_take_snapshot";
   if (!config_result.ok()) {
     return status_serializer.Serialize(config_result.status());
   }

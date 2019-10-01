@@ -63,7 +63,6 @@ int ecall_take_snapshot(char **output, bridge_size_t *output_len) {
   int result = 0;
   size_t tmp_output_len;
   try {
-    LOG(INFO) << "ecall_take_snapshot";
     result =
         asylo::__asylo_take_snapshot(output, &tmp_output_len);
   } catch (...) {
