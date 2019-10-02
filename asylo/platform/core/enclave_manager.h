@@ -251,6 +251,9 @@ class EnclaveManager {
                         bool skip_finalize = false)
       LOCKS_EXCLUDED(client_table_lock_);
 
+  Status cleanup(EnclaveClient *client)
+      LOCKS_EXCLUDED(client_table_lock_);
+
   /// Fetches the shared resource manager object.
   ///
   /// \return The SharedResourceManager instance.

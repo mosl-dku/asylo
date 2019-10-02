@@ -68,18 +68,20 @@ void mig_handler(int signo) {
   void *base = client->base_address();
   size_t size = client->size();
 
-  int pid;
+  int pid = 0;
   pid = fork();
   if (pid < 0) {
 	LOG(FATAL) <<"fork failed";
   } else if (pid == 0) {
 	//child
 
+	asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
 	auto manager_result = asylo::EnclaveManager::Instance();
 	if (!manager_result.ok()) {
 		LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
 	}
 	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
+	//manager->cleanup(client);
 
 	// now, reload enclave, then restore snapshot from migration
 	ReloadEnclave(manager, base, size);
@@ -90,27 +92,64 @@ void mig_handler(int signo) {
 	return;
   } else if (pid > 0) {
 	//parent
+	int wstatus;
+
+    asylo::ForkHandshakeConfig fconfig;
+    fconfig.set_is_parent(true);
+    fconfig.set_socket(NULL);
+    asylo::Status status = client->EnterAndTransferSecureSnapshotKey(fconfig);
+    if (!status.ok()) {
+		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
+    }
+
+    int pid = wait(&wstatus);
   }
 }
 
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
 
+  asylo::Status status;
   // Part 1: Initialization
-  std::cout << "ReLoading " << absl::GetFlag(FLAGS_enclave_path) << std::endl;
   asylo::EnclaveLoader *loader = manager->GetLoaderFromClient(client);
   asylo::EnclaveConfig config = GetApplicationConfig();
-  asylo::Status status = manager->LoadEnclave("hello_enclave", *loader, config, base, size);
+  config.set_enable_fork(true);
+  status = manager->LoadEnclave("hello_enclave", *loader, config, base, size);
   if (!status.ok()) {
     LOG(QFATAL) << "Load " << absl::GetFlag(FLAGS_enclave_path)
                 << " failed: " << status;
   }
-  if (client != NULL) {
+  // Verifies that the new enclave is loaded at the same virtual address space
+  // as the parent enclave.
+  client = dynamic_cast<asylo::SgxClient *>(manager->GetClient("hello_enclave"));
+  void *child_enclave_base_address = client->base_address();
+  if (child_enclave_base_address != base) {
+    LOG(ERROR) << "New enclave address: " << child_enclave_base_address
+               << " is different from the parent enclave address: "
+               << base;
+    errno = EAGAIN;
+    return ;
+  } else {
+	LOG(INFO) << "Reloaded Enclave "<< absl::GetFlag(FLAGS_enclave_path) ;
+  }
+
+  client->SetProcessId();
+
+  asylo::ForkHandshakeConfig fconfig;
+  fconfig.set_is_parent(false);
+  fconfig.set_socket(NULL);
+  status = client->EnterAndTransferSecureSnapshotKey(fconfig);
+  if (!status.ok()) {
+		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
+  } else {
+
+	LOG(INFO) << "EnterAndRestore";
     status = client->EnterAndRestore(layout);
     if (!status.ok()) {
-		LOG(QFATAL) << "EnterAndRestore failed";
+      LOG(ERROR) << status << "Enclave restore failed & resume from the beginning";
     }
   }
 
+  LOG(INFO) << "Restored Enclave";
 }
 
 void ResumeExecution(asylo::EnclaveManager *manager) {

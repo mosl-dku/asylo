@@ -190,6 +190,20 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
   return finalize_status;
 }
 
+Status EnclaveManager::cleanup(EnclaveClient *client) {
+
+  absl::WriterMutexLock lock(&client_table_lock_);
+  //Status status = client->DestroyEnclave();
+  //LOG_IF(ERROR, !status.ok()) << "Client's DestroyEnclave failed: " << status;
+  const auto &name = name_by_client_[client];
+  client_by_name_.erase(name);
+  name_by_client_.erase(client);
+  // we should use the same loader
+  // loader_by_client_.erase(client);
+
+  return Status::OkStatus();
+}
+
 EnclaveClient *EnclaveManager::GetClient(const std::string &name) const {
   absl::ReaderMutexLock lock(&client_table_lock_);
   auto it = client_by_name_.find(name);
@@ -289,13 +303,10 @@ Status EnclaveManager::LoadEnclaveInternal(const std::string &name,
   {
     absl::ReaderMutexLock lock(&client_table_lock_);
     if (client_by_name_.find(name) != client_by_name_.end()) {
-	/*
       Status status(error::GoogleError::ALREADY_EXISTS,
                     "Name already exists: " + name);
       LOG(ERROR) << "LoadEnclave failed: " << status;
       return status;
-	*/
-	  client_by_name_.erase(name);
     }
   }
 

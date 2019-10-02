@@ -101,6 +101,7 @@ int ecall_transfer_secure_snapshot_key(const char *input,
                                        bridge_size_t *output_len) {
   int result = 0;
   bridge_size_t bridge_output_len;
+  LOG(INFO) << "ecall_transfer_secure_snapshot_key";
   try {
     result = asylo::__asylo_transfer_secure_snapshot_key(
         input, static_cast<size_t>(input_len), output, &bridge_output_len);

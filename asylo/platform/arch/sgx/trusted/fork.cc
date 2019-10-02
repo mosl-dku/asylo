@@ -20,6 +20,7 @@
 
 #include <openssl/rand.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 
 #include <atomic>
 #include <cstddef>
@@ -807,10 +808,12 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
   }
 
   // Sends the serialized encrypted snapshot key to the child.
-  if (enc_untrusted_write(socket, encrypted_snapshot_key_string.data(),
-                          encrypted_snapshot_key_string.size()) <= 0) {
-    return Status(static_cast<error::PosixError>(errno), "Write failed");
-  }
+  int flag = O_CREAT | O_WRONLY;
+  int mode S_IRWXU;
+  int fd = enc_untrusted_open("/tmp/enc_snap_key", flag, mode);
+  enc_untrusted_write(fd, encrypted_snapshot_key_string.data(),
+						  encrypted_snapshot_key_string.size());
+  enc_untrusted_close(fd);
 
   return Status::OkStatus();
 }
@@ -819,7 +822,13 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
 Status ReceiveSnapshotKey(std::unique_ptr<AeadCryptor> cryptor, int socket) {
   // Receives the encrypted snapshot key from the parent.
   char buf[1024];
-  int rc = enc_untrusted_read(socket, buf, sizeof(buf));
+  int fd, rc;
+  int flag = O_RDONLY;
+  int mode = S_IRWXU;
+
+  fd = enc_untrusted_open("/tmp/enc_snap_key", flag, mode);
+  rc = enc_untrusted_read(fd, buf, sizeof(buf));
+  enc_untrusted_close(fd);
   if (rc <= 0) {
     return Status(static_cast<error::PosixError>(errno), "Read failed");
   }
@@ -875,7 +884,7 @@ Status TransferSecureSnapshotKey(
   }
 
   bool is_parent = fork_handshake_config.is_parent();
-
+/*
   // The parent should only start a key transfer if it's requested by a fork
   // request inside an enclave.
   if (is_parent && !ClearSnapshotKeyTransferRequested()) {
@@ -916,6 +925,10 @@ Status TransferSecureSnapshotKey(
   CleansingVector<uint8_t> record_protocol_key;
   ASYLO_ASSIGN_OR_RETURN(record_protocol_key,
                          handshaker->GetRecordProtocolKey());
+*/
+  CleansingVector<uint8_t> record_protocol_key(kSnapshotKeySize);
+  long long val  = 0x11;
+  memcpy(record_protocol_key.data(), &val, sizeof(long long));
   std::unique_ptr<AeadCryptor> cryptor;
   ASYLO_ASSIGN_OR_RETURN(cryptor,
                          AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
