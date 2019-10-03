@@ -118,6 +118,7 @@ int ecall_initiate_migration() {
   int result = 0;
   asylo::SaveThreadLayoutForSnapshot();
   asylo::SetForkRequested();
+  asylo::SetMigrationRequested();
 
   return result;
 }

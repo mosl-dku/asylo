@@ -111,7 +111,6 @@ void mig_handler(int signo) {
 		LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
 	}
 	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
-	//manager->cleanup(client);
 
 	// now, reload enclave, then restore snapshot from migration
 	ReloadEnclave(manager, base, size);
@@ -160,6 +159,7 @@ void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
     errno = EAGAIN;
     return ;
   } else {
+    asylo::Status status = client->InitiateMigration();
 	LOG(INFO) << "Reloaded Enclave "<< absl::GetFlag(FLAGS_enclave_path) ;
   }
 }
