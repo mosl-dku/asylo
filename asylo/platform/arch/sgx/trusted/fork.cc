@@ -644,6 +644,8 @@ Status RestoreForFork(const char *input, size_t input_len) {
       break;
     }
 
+	int is_fork = 0;
+    if (is_fork) {
     // Now that data is restored, the information of the thread and stack
     // address of the calling thread can be retrieved. Decrypts the thread
     // information and stack.
@@ -652,6 +654,7 @@ Status RestoreForFork(const char *input, size_t input_len) {
       CopyNonOkStatus(status, &error_code, error_message,
                       ABSL_ARRAYSIZE(error_message));
       break;
+    }
     }
   } while (0);
 

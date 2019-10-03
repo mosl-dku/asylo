@@ -52,6 +52,30 @@ void ResumeExecution(asylo::EnclaveManager *manager);
 void Destroy(asylo::EnclaveManager *manager);
 asylo::EnclaveConfig GetApplicationConfig();
 
+// trapping segfault
+void child_handler(int signo) {
+
+  asylo::Status status;
+  client->SetProcessId();
+  asylo::ForkHandshakeConfig fconfig;
+  fconfig.set_is_parent(false);
+  fconfig.set_socket(NULL);
+  status = client->EnterAndTransferSecureSnapshotKey(fconfig);
+  if (!status.ok()) {
+		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
+  } else {
+
+	LOG(INFO) << "EnterAndRestore";
+    status = client->EnterAndRestore(layout);
+    if (!status.ok()) {
+      LOG(ERROR) << status << "Enclave restore failed & resume from the beginning";
+    }
+  }
+
+  LOG(INFO) << "Restored Enclave";
+
+}
+
 // callback for SIGSNAPSHOT
 void mig_handler(int signo) {
   LOG(INFO) << "(" << getpid() << ") SIGSNAPSHOT recv'd: Taking snapshot";
@@ -74,6 +98,12 @@ void mig_handler(int signo) {
 	LOG(FATAL) <<"fork failed";
   } else if (pid == 0) {
 	//child
+  struct sigaction old_sa;
+  struct sigaction new_sa;
+  memset(&new_sa, 0, sizeof(new_sa));
+  new_sa.sa_handler = child_handler; // called when the signal is triggered
+  sigaction(SIGUSR2, &new_sa, &old_sa);
+
 
 	asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
 	auto manager_result = asylo::EnclaveManager::Instance();
@@ -85,6 +115,7 @@ void mig_handler(int signo) {
 
 	// now, reload enclave, then restore snapshot from migration
 	ReloadEnclave(manager, base, size);
+
 	ResumeExecution(manager);
 	Destroy(manager);
 	exit(0);
@@ -131,9 +162,12 @@ void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
   } else {
 	LOG(INFO) << "Reloaded Enclave "<< absl::GetFlag(FLAGS_enclave_path) ;
   }
+}
 
+void ResumeExecution(asylo::EnclaveManager *manager) {
+
+  asylo::Status status;
   client->SetProcessId();
-
   asylo::ForkHandshakeConfig fconfig;
   fconfig.set_is_parent(false);
   fconfig.set_socket(NULL);
@@ -150,9 +184,6 @@ void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
   }
 
   LOG(INFO) << "Restored Enclave";
-}
-
-void ResumeExecution(asylo::EnclaveManager *manager) {
 
   // Part 0: Setup
   absl::ParseCommandLine(g_argc, g_argv);
