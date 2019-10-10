@@ -98,6 +98,11 @@ PrimitiveStatus FinalizeEnclave(void *context, TrustedParameterStack *params) {
             "FinalizeEnclave does not expect any parameters."};
   }
   PrimitiveStatus status = asylo_enclave_fini();
+  if (!status.ok()) {
+	LOG(ERROR) << "FinalizeEnclave: " << status.error_message();
+    return status;
+  }
+
   return status;
 }
 

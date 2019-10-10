@@ -42,9 +42,15 @@ ABSL_FLAG(std::string, names, "",
 
 // some global var
 asylo::SgxClient *client;
+void *enc_base;
+size_t enc_size;
 int g_argc;
 char **g_argv;
 asylo::SnapshotLayout layout;
+struct sigaction old_sa;
+struct sigaction new_sa;
+struct sigaction old_mig_sa;
+struct sigaction new_mig_sa;
 
 // some func defs
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size);
@@ -52,28 +58,36 @@ void ResumeExecution(asylo::EnclaveManager *manager);
 void Destroy(asylo::EnclaveManager *manager);
 asylo::EnclaveConfig GetApplicationConfig();
 
-// trapping segfault
-void child_handler(int signo) {
+// trapping segfault == initiate enclave loading at child
+void initiate_enclave(int signo) {
 
-  asylo::Status status;
-  client->SetProcessId();
-  asylo::ForkHandshakeConfig fconfig;
-  fconfig.set_is_parent(false);
-  fconfig.set_socket(NULL);
-  status = client->EnterAndTransferSecureSnapshotKey(fconfig);
-  if (!status.ok()) {
-		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
-  } else {
+  int wpid, wstatus;
+  int pid = fork();
+  if (pid < 0) {
+	LOG(FATAL) <<"fork failed";
+  } else if (pid > 0) {
+    int wpid = wait(&wstatus);
 
-	LOG(INFO) << "EnterAndRestore";
-    status = client->EnterAndRestore(layout);
-    if (!status.ok()) {
-      LOG(ERROR) << status << "Enclave restore failed & resume from the beginning";
-    }
+  asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
+  auto manager_result = asylo::EnclaveManager::Instance();
+  if (!manager_result.ok()) {
+    LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
   }
+  asylo::EnclaveManager *manager = manager_result.ValueOrDie();
 
-  LOG(INFO) << "Restored Enclave";
+  // now, reload enclave, then restore snapshot from migration
+  ReloadEnclave(manager, enc_base, enc_size);
 
+  ResumeExecution(manager);
+  Destroy(manager);
+  exit(0);
+  // never reach here
+  return;
+
+  } else {
+    execl("/usr/sbin/service", "aesmd", "restart", 0);
+	exit(0);
+  }
 }
 
 // callback for SIGSNAPSHOT
@@ -89,20 +103,15 @@ void mig_handler(int signo) {
 	}
   }
 
-  void *base = client->base_address();
-  size_t size = client->size();
-
   int pid = 0;
   pid = fork();
   if (pid < 0) {
 	LOG(FATAL) <<"fork failed";
   } else if (pid == 0) {
 	//child
-  struct sigaction old_sa;
-  struct sigaction new_sa;
-  memset(&new_sa, 0, sizeof(new_sa));
-  new_sa.sa_handler = child_handler; // called when the signal is triggered
-  sigaction(SIGUSR2, &new_sa, &old_sa);
+	while (1) {
+		sleep (1);
+	}
 
 	asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
 	auto manager_result = asylo::EnclaveManager::Instance();
@@ -112,7 +121,7 @@ void mig_handler(int signo) {
 	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
 
 	// now, reload enclave, then restore snapshot from migration
-	ReloadEnclave(manager, base, size);
+	ReloadEnclave(manager, enc_base, enc_size);
 
 	ResumeExecution(manager);
 	Destroy(manager);
@@ -122,29 +131,28 @@ void mig_handler(int signo) {
   } else if (pid > 0) {
 	//parent
 	int wstatus;
-    asylo::EnclaveFinal final_input;
+
+    asylo::ForkHandshakeConfig fconfig;
+    fconfig.set_is_parent(true);
+    fconfig.set_socket(0);
+    asylo::Status status = client->EnterAndTransferSecureSnapshotKey(fconfig);
+    if (!status.ok()) {
+		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
+    }
+    int wpid = wait(&wstatus);
+	if (wpid != pid) {
+		LOG(ERROR) << "wrong child~";
+	}
+
 	auto manager_result = asylo::EnclaveManager::Instance();
 	if (!manager_result.ok()) {
 		LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
 	}
 	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
+	Destroy(manager);
 
-
-    asylo::ForkHandshakeConfig fconfig;
-    fconfig.set_is_parent(true);
-    fconfig.set_socket(NULL);
-    asylo::Status status = client->EnterAndTransferSecureSnapshotKey(fconfig);
-    if (!status.ok()) {
-		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
-    }
-    int pid = wait(&wstatus);
-
-    status = manager->DestroyEnclave(client, final_input);
-    if (!status.ok()) {
-      LOG(QFATAL) << "Destroy " << absl::GetFlag(FLAGS_enclave_path)
-                  << " failed: " << status;
-    }
-  }
+	exit(0);
+  } //parent
 }
 
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
@@ -154,6 +162,7 @@ void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
   asylo::EnclaveLoader *loader = manager->GetLoaderFromClient(client);
   asylo::EnclaveConfig config = GetApplicationConfig();
   config.set_enable_fork(true);
+  config.set_enable_migration(true);
   status = manager->LoadEnclave("hello_enclave", *loader, config, base, size);
   if (!status.ok()) {
     LOG(QFATAL) << "Load " << absl::GetFlag(FLAGS_enclave_path)
@@ -181,7 +190,7 @@ void ResumeExecution(asylo::EnclaveManager *manager) {
   client->SetProcessId();
   asylo::ForkHandshakeConfig fconfig;
   fconfig.set_is_parent(false);
-  fconfig.set_socket(NULL);
+  fconfig.set_socket(0);
   status = client->EnterAndTransferSecureSnapshotKey(fconfig);
   if (!status.ok()) {
 		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
@@ -239,13 +248,11 @@ void Destroy(asylo::EnclaveManager *manager) {
 
   asylo::Status status;
   asylo::EnclaveFinal final_input;
-  status = manager->DestroyEnclave(client, final_input);
+  status = manager->DestroyEnclave(client, final_input, 0);
   if (!status.ok()) {
-    LOG(QFATAL) << "Destroy " << absl::GetFlag(FLAGS_enclave_path)
+    LOG(ERROR) << "Destroy " << absl::GetFlag(FLAGS_enclave_path)
                 << " failed: " << status;
   }
-
-
 }
 
 int main(int argc, char *argv[]) {
@@ -253,11 +260,14 @@ int main(int argc, char *argv[]) {
   g_argc = argc;
   g_argv = argv;
   // signal handler for takesnapshot
-  struct sigaction old_sa;
-  struct sigaction new_sa;
   memset(&new_sa, 0, sizeof(new_sa));
   new_sa.sa_handler = mig_handler; // called when the signal is triggered
   sigaction(SIGSNAPSHOT, &new_sa, &old_sa);
+
+  // signal handler for trapping migration at target
+  memset(&new_mig_sa, 0, sizeof(new_sa));
+  new_mig_sa.sa_handler = initiate_enclave; // called when the signal is triggered
+  sigaction(SIGUSR1, &new_mig_sa, &old_mig_sa);
 
   // Part 0: Setup
   absl::ParseCommandLine(argc, argv);
@@ -278,9 +288,9 @@ int main(int argc, char *argv[]) {
   asylo::EnclaveManager *manager = manager_result.ValueOrDie();
   std::cout << "Loading " << absl::GetFlag(FLAGS_enclave_path) << std::endl;
 
-
   asylo::EnclaveConfig config = GetApplicationConfig();
   config.set_enable_fork(true);
+  config.set_enable_migration(true);
 
   asylo::SgxLoader loader(absl::GetFlag(FLAGS_enclave_path), /*debug=*/true);
   asylo::Status status = manager->LoadEnclave("hello_enclave", loader, config);
@@ -291,6 +301,9 @@ int main(int argc, char *argv[]) {
 
   // Part 2: Secure execution
   client = reinterpret_cast<asylo::SgxClient *>(manager->GetClient("hello_enclave"));
+
+  enc_base = client->base_address();
+  enc_size = client->size();
 
   for (const auto &name : names) {
     asylo::EnclaveInput input;

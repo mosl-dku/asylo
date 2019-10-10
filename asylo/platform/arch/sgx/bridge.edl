@@ -83,6 +83,7 @@ enclave {
 
 	// Invokes a utility ecall that enters the enclave to initiate migration
 	utility_tcs public int ecall_initiate_migration();
+
   };
 
   // Unless otherwise specified, each of the following calls invokes the

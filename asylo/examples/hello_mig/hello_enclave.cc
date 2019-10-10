@@ -39,11 +39,10 @@ class HelloApplication : public asylo::TrustedApplication {
     std::string visitor =
         input.GetExtension(hello_world::enclave_input_hello).to_greet();
 
-	for (visitor_count_ = 0 ; visitor_count_ < 20 ; visitor_count_++) {
-    	LOG(INFO) << "Hello ("<< getpid() << ") #" << visitor_count_ 
+	for (int i = 0 ; visitor_count_ < 200 ; i++) {
+    	LOG(INFO) << "Hello ("<< getpid() << ") #" << visitor_count_++
 			<< " \t## " << global_visitor_count++;
-		for (int i = 0 ; i < 0xFFFFFFFF ; i++) {
-		}
+		sleep(3);
 	}
 
     if (output) {
