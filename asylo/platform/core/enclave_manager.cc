@@ -170,9 +170,6 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
   Status finalize_status;
   if (!skip_finalize) {
     finalize_status = client->EnterAndFinalize(final_input);
-	if (!finalize_status.ok()) {
-		LOG(ERROR) << "finalize_status: " <<finalize_status;
-	}
   }
 
   Status status;
@@ -365,7 +362,6 @@ void EnclaveManager::RemoveEnclaveReference(const std::string &name) {
   absl::WriterMutexLock lock(&client_table_lock_);
   while (client_by_name_.find(name) != client_by_name_.end()) {
     EnclaveClient *client = client_by_name_[name].get();
-    //EnclaveClient *client = client_by_name_[name].get();
     client_by_name_.erase(name);
     name_by_client_.erase(client);
   }

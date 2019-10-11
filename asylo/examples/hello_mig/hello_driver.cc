@@ -249,10 +249,6 @@ void Destroy(asylo::EnclaveManager *manager) {
   asylo::Status status;
   asylo::EnclaveFinal final_input;
   status = manager->DestroyEnclave(client, final_input, 0);
-  if (!status.ok()) {
-    LOG(ERROR) << "Destroy " << absl::GetFlag(FLAGS_enclave_path)
-                << " failed: " << status;
-  }
 }
 
 int main(int argc, char *argv[]) {
