@@ -65,28 +65,39 @@ void initiate_enclave(int signo) {
   int pid = fork();
   if (pid < 0) {
 	LOG(FATAL) <<"fork failed";
-  } else if (pid > 0) {
-    int wpid = wait(&wstatus);
+  } else if (pid == 0) {
+	pid = fork();
 
-  asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
-  auto manager_result = asylo::EnclaveManager::Instance();
-  if (!manager_result.ok()) {
-    LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
-  }
-  asylo::EnclaveManager *manager = manager_result.ValueOrDie();
+	if (pid < 0) {
+	  LOG(FATAL) <<"fork failed";
+	} else if (pid > 0) {
+		// wait a second for restarting aesmd service exec
+	  sleep(1);
+      asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
+      auto manager_result = asylo::EnclaveManager::Instance();
+      if (!manager_result.ok()) {
+        LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
+      }
+      asylo::EnclaveManager *manager = manager_result.ValueOrDie();
 
-  // now, reload enclave, then restore snapshot from migration
-  ReloadEnclave(manager, enc_base, enc_size);
+      // now, reload enclave, then restore snapshot from migration
+      ReloadEnclave(manager, enc_base, enc_size);
 
-  ResumeExecution(manager);
-  Destroy(manager);
-  exit(0);
-  // never reach here
-  return;
+      ResumeExecution(manager);
+      Destroy(manager);
+      exit(0);
+      // never reach here
+      return;
+	} else {
+		// child exec. restart aesmd service
+        execl("/usr/sbin/service", "service", "aesmd", "restart", 0);
+		exit(0);
+	}
 
   } else {
-    execl("/usr/sbin/service", "aesmd", "restart", 0);
-	exit(0);
+	// wait until child completes
+    wpid = wait(&wstatus);
+    exit(0);
   }
 }
 
