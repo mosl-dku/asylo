@@ -994,7 +994,6 @@ int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
 
   // A snapshot should be taken and restored for fork, take a snapshot of the
   // current enclave memory.
-  void *enclave_base_address = client->base_address();
   asylo::SnapshotLayout snapshot_layout;
   asylo::Status status = client->EnterAndTakeSnapshot(&snapshot_layout);
   if (!status.ok()) {
@@ -1027,6 +1026,7 @@ int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
                    return SnapshotDataDeleter(entry);
                  });
 
+  return 0;
 }
 
 pid_t ocall_enc_untrusted_fork(const char *enclave_name, const char *config,

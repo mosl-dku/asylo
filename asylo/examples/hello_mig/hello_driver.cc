@@ -61,7 +61,7 @@ asylo::EnclaveConfig GetApplicationConfig();
 // trapping segfault == initiate enclave loading at child
 void initiate_enclave(int signo) {
 
-  int wpid, wstatus;
+  int wstatus;
   int pid = fork();
   if (pid < 0) {
 	LOG(FATAL) <<"fork failed";
@@ -96,7 +96,7 @@ void initiate_enclave(int signo) {
 
   } else {
 	// wait until child completes
-    wpid = wait(&wstatus);
+    waitpid(pid, &wstatus, NULL);
     exit(0);
   }
 }
@@ -152,7 +152,7 @@ void mig_handler(int signo) {
     }
     int wpid = wait(&wstatus);
 	if (wpid != pid) {
-		LOG(ERROR) << "wrong child~";
+		LOG(INFO) << "child "<< wpid << " completed";
 	}
 
 	auto manager_result = asylo::EnclaveManager::Instance();
