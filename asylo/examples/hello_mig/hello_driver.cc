@@ -90,7 +90,7 @@ void initiate_enclave(int signo) {
       return;
 	} else {
 		// child exec. restart aesmd service
-        execl("/usr/sbin/service", "service", "aesmd", "restart", 0);
+        execl("/usr/bin/sudo", "sudo", "service", "aesmd", "restart", 0);
 		exit(0);
 	}
 
@@ -114,35 +114,6 @@ void mig_handler(int signo) {
 	}
   }
 
-  int pid = 0;
-  pid = fork();
-  if (pid < 0) {
-	LOG(FATAL) <<"fork failed";
-  } else if (pid == 0) {
-	//child
-	while (1) {
-		sleep (1);
-	}
-
-	asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
-	auto manager_result = asylo::EnclaveManager::Instance();
-	if (!manager_result.ok()) {
-		LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
-	}
-	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
-
-	// now, reload enclave, then restore snapshot from migration
-	ReloadEnclave(manager, enc_base, enc_size);
-
-	ResumeExecution(manager);
-	Destroy(manager);
-	exit(0);
-	// never reach here
-	return;
-  } else if (pid > 0) {
-	//parent
-	int wstatus;
-
     asylo::ForkHandshakeConfig fconfig;
     fconfig.set_is_parent(true);
     fconfig.set_socket(0);
@@ -150,20 +121,6 @@ void mig_handler(int signo) {
     if (!status.ok()) {
 		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
     }
-    int wpid = wait(&wstatus);
-	if (wpid != pid) {
-		LOG(INFO) << "child "<< wpid << " completed";
-	}
-
-	auto manager_result = asylo::EnclaveManager::Instance();
-	if (!manager_result.ok()) {
-		LOG(QFATAL) << "EnclaveManager unavailable: " << manager_result.status();
-	}
-	asylo::EnclaveManager *manager = manager_result.ValueOrDie();
-	Destroy(manager);
-
-	exit(0);
-  } //parent
 }
 
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
