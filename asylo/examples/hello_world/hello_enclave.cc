@@ -114,6 +114,9 @@ class HelloApplication : public asylo::TrustedApplication {
 			for(unsigned int i=0; i<0xffffffff;i++);
 			for(unsigned int i=0; i<0xffffffff;i++);
 			for(unsigned int i=0; i<0xffffffff;i++);
+			for(unsigned int i=0; i<0xffffffff;i++);
+			for(unsigned int i=0; i<0xffffffff;i++);
+			for(unsigned int i=0; i<0xffffffff;i++);
 			if (output) {
 				LOG(INFO) << "Incrementing visitor count...";
 				output->MutableExtension(hello_world::enclave_output_hello)

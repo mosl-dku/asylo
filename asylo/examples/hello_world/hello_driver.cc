@@ -73,22 +73,24 @@ void signal_handler(int signo)
 	}
 	else // parent
 	{
-		pid = fork();
+		waitpid(pid, &wstatus, NULL);
+		LOG(INFO) << "exec done\n";
+	//	pid = fork();
 
-		if(pid < 0)
-		{
-			perror("fork error");
-		}
-		else if(pid == 0) //child
-		{
+	//	if(pid < 0)
+	//	{
+	//		perror("fork error");
+	//	}
+	//	else if(pid == 0) //child
+	//	{
 			hello(g_argc, g_argv);
-			exit(0);
-		}
-		else // parent
-		{
-			waitpid(pid, &wstatus, NULL);
-			exit(0);
-		}
+	//		exit(0);
+	//	}
+	//	else // parent
+	//	{
+	//		waitpid(pid, &wstatus, NULL);
+	//		exit(0);
+	//	}
 	}
 }
 
