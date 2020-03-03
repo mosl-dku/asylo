@@ -24,6 +24,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <sys/time.h>
+
 #define SIGSNAPSHOT SIGUSR2
 
 #include "absl/flags/flag.h"
@@ -51,6 +53,9 @@ struct sigaction old_sa;
 struct sigaction new_sa;
 struct sigaction old_mig_sa;
 struct sigaction new_mig_sa;
+
+struct timeval tv;
+struct timeval tve;
 
 // some func defs
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size);
@@ -85,6 +90,7 @@ void initiate_enclave(int signo) {
 
       ResumeExecution(manager);
       Destroy(manager);
+
       exit(0);
       // never reach here
       return;
@@ -103,6 +109,8 @@ void initiate_enclave(int signo) {
 
 // callback for SIGSNAPSHOT
 void mig_handler(int signo) {
+
+  gettimeofday(&tv, NULL);
   LOG(INFO) << "(" << getpid() << ") SIGSNAPSHOT recv'd: Taking snapshot";
 
   if (client != NULL) {
@@ -121,6 +129,7 @@ void mig_handler(int signo) {
     if (!status.ok()) {
 		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
     }
+
 }
 
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
@@ -172,6 +181,8 @@ void ResumeExecution(asylo::EnclaveManager *manager) {
   }
 
   LOG(INFO) << "Restored Enclave";
+  gettimeofday(&tve, NULL);
+  LOG(INFO) << "( " <<  "Total time to take snapshot : " << tve.tv_sec - tv.tv_sec << " sec " << tve.tv_usec - tv.tv_usec << " usec )";
 
   // Part 0: Setup
   absl::ParseCommandLine(g_argc, g_argv);
