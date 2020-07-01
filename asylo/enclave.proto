@@ -125,6 +125,10 @@ message EnclaveConfig {
   // Whether fork (which reserves an extra thread inside the enclave) is
   // enabled.
   optional bool enable_fork = 12 [default = false];
+  
+  //Whether migration/fork (which reserves an extra thread inside the enclave) is
+  //enabled.
+  optional bool enable_migration = 13 [default = false];   
 
   // Allow user extensions.
   extensions 1000 to max;
