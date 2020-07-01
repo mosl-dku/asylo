@@ -103,8 +103,27 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
     finalize_status = client->EnterAndFinalize(final_input);
   }
 
-  Status status = client->DestroyEnclave();
-  LOG_IF(ERROR, !status.ok()) << "Client's DestroyEnclave failed: " << status;
+  Status status;
+  status = client->DestroyEnclave();
+  status =
+      EnclaveSignalDispatcher::GetInstance()->DeregisterAllSignalsForClient(
+          client);
+  LOG_IF(ERROR, !status.ok())
+      << "DeregisterAllSignalsForClient failed: " << status;
+
+  absl::WriterMutexLock lock(&client_table_lock_);
+  const auto &name = name_by_client_[client];
+  client_by_name_.erase(name);
+  name_by_client_.erase(client);
+  loader_by_client_.erase(client);
+
+  return status;
+}
+
+Status EnclaveManager::cleanup(EnclaveClient *client) {
+
+  Status status;
+  status = client->DestroyEnclave();
 
   client->ReleaseMemory();
 
@@ -114,7 +133,7 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
   name_by_client_.erase(client);
   load_config_by_client_.erase(client);
 
-  return finalize_status;
+  return Status::OkStatus();
 }
 
 EnclaveClient *EnclaveManager::GetClient(absl::string_view name) const {
@@ -351,9 +370,11 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
 
 void EnclaveManager::RemoveEnclaveReference(absl::string_view name) {
   absl::WriterMutexLock lock(&client_table_lock_);
-  EnclaveClient *client = client_by_name_[name].get();
-  client_by_name_.erase(name);
-  name_by_client_.erase(client);
+  while (client_by_name_.find(name) != client_by_name_.end()) {
+    EnclaveClient *client = client_by_name_[name].get();
+    client_by_name_.erase(name);
+    name_by_client_.erase(client);
+  }
 }
 
 primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,
