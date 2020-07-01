@@ -255,6 +255,52 @@ int ocall_enc_untrusted_register_signal_handler(int klinux_signum,
 
 void ocall_enc_untrusted__exit(int rc) { _exit(rc); }
 
+int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
+  auto manager_result = asylo::EnclaveManager::Instance();
+  if (!manager_result.ok()) {
+    return -1;
+  }
+  asylo::EnclaveManager *manager = manager_result.ValueOrDie();
+  asylo::SgxClient *client = dynamic_cast<asylo::SgxClient *>(
+      manager->GetClient(enclave_name));
+
+  // A snapshot should be taken and restored for fork, take a snapshot of the
+  // current enclave memory.
+  asylo::SnapshotLayout snapshot_layout;
+  asylo::Status status = client->EnterAndTakeSnapshot(&snapshot_layout);
+  if (!status.ok()) {
+    LOG(ERROR) << "EnterAndTakeSnapshot failed: " << status;
+    errno = ENOMEM;
+    return -1;
+  }
+
+  // The snapshot memory should be freed in both the parent and the child
+  // process.
+  std::vector<SnapshotDataDeleter> data_deleter_;
+  std::vector<SnapshotDataDeleter> bss_deleter_;
+  std::vector<SnapshotDataDeleter> heap_deleter_;
+
+  std::transform(snapshot_layout.data().cbegin(), snapshot_layout.data().cend(),
+                 std::back_inserter(data_deleter_),
+                 [](const asylo::SnapshotLayoutEntry &entry) {
+                   return SnapshotDataDeleter(entry);
+                 });
+
+  std::transform(snapshot_layout.bss().cbegin(), snapshot_layout.bss().cend(),
+                 std::back_inserter(bss_deleter_),
+                 [](const asylo::SnapshotLayoutEntry &entry) {
+                   return SnapshotDataDeleter(entry);
+                 });
+
+  std::transform(snapshot_layout.heap().cbegin(), snapshot_layout.heap().cend(),
+                 std::back_inserter(heap_deleter_),
+                 [](const asylo::SnapshotLayoutEntry &entry) {
+                   return SnapshotDataDeleter(entry);
+                 });
+
+  return 0;
+}
+
 int32_t ocall_enc_untrusted_fork(const char *enclave_name,
                                  bool restore_snapshot) {
   auto primitive_client = dynamic_cast<asylo::primitives::SgxEnclaveClient *>(
