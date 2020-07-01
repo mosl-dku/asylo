@@ -17,42 +17,44 @@
  */
 
 #include <pthread.h>
-
+#include <sched.h>
 #include <signal.h>
+#include <sys/mman.h>
+
+#include <array>
+#include <bitset>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <type_traits>
-#include <array>
-#include <bitset>
 
-#include "asylo/platform/arch/include/trusted/host_calls.h"
+#include "asylo/platform/common/enclave_state.h"
 #include "asylo/platform/common/time_util.h"
+#include "asylo/platform/core/atomic.h"
 #include "asylo/platform/core/trusted_global_state.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 #include "asylo/platform/posix/include/semaphore.h"
 #include "asylo/platform/posix/pthread_impl.h"
+#include "asylo/platform/posix/syscall/enclave_clone.h"
 #include "asylo/platform/posix/threading/thread_manager.h"
 #include "asylo/platform/primitives/trusted_runtime.h"
 #include "asylo/platform/primitives/util/trusted_memory.h"
 
 namespace {
 
-inline int InterlockedExchange(pthread_spinlock_t *dest,
-                               pthread_spinlock_t old_value,
-                               pthread_spinlock_t new_value) {
-  return __sync_val_compare_and_swap(dest, old_value, new_value);
-}
+constexpr size_t kNumSpinLockAttempts = 10000;
 
-constexpr size_t PTHREAD_KEYS_MAX = 64;
-thread_local std::array<const void *,
-             PTHREAD_KEYS_MAX> thread_specific = {nullptr};
-
-static pthread_mutex_t used_thread_keys_lock = PTHREAD_MUTEX_INITIALIZER;
-std::bitset<PTHREAD_KEYS_MAX> used_thread_keys;
+static void (*tsd_destructors[PTHREAD_KEYS_MAX])(void *) = {0};
+static pthread_rwlock_t key_lock = PTHREAD_RWLOCK_INITIALIZER;
+static void NoDestructor(void *dummy) {}
+size_t __pthread_tsd_size = sizeof(void *) * PTHREAD_KEYS_MAX;
 
 inline int pthread_spin_lock(pthread_spinlock_t *lock) {
-  while (InterlockedExchange(lock, 0, 1) != 0) {
+  constexpr unsigned int kLocked = 1;
+  constexpr unsigned int kUnlocked = 0;
+  while (asylo::AtomicExchange(lock, kLocked, std::memory_order_acquire) !=
+         kUnlocked) {
     while (*lock) {
       enc_pause();
     }
@@ -61,8 +63,18 @@ inline int pthread_spin_lock(pthread_spinlock_t *lock) {
 }
 
 inline int pthread_spin_unlock(pthread_spinlock_t *lock) {
-  *lock = 0;
+  asylo::AtomicClear(lock, std::memory_order_release);
   return 0;
+}
+
+// Initializes an untrusted wait queue. Will do nothing if enclave is not yet
+// running, if called during enclave startup.
+inline void initialize_wait_queue(int32_t **wait_queue_ptr) {
+  if (wait_queue_ptr && !(*wait_queue_ptr) &&
+      asylo::GetState() == asylo::EnclaveState::kRunning) {
+    *wait_queue_ptr = enc_untrusted_create_wait_queue();
+    CHECK_NE(*wait_queue_ptr, nullptr);
+  }
 }
 
 // An RAII guard object managing exclusive access to a "lockable" object, where
@@ -99,7 +111,7 @@ __pthread_list_node_t *alloc_list_node(pthread_t thread_id) {
 void free_list_node(__pthread_list_node_t *node) { delete node; }
 
 int pthread_mutex_check_parameter(pthread_mutex_t *mutex) {
-  if (!asylo::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
     return EFAULT;
   }
 
@@ -123,50 +135,36 @@ int pthread_mutex_lock_internal(pthread_mutex_t *mutex) {
   if (mutex->_owner != PTHREAD_T_NULL) {
     return EBUSY;
   }
-
-  asylo::pthread_impl::QueueOperations list(mutex);
-  if (list.Empty() || list.Front() == self) {
-    list.Dequeue();
-    mutex->_owner = self;
-    mutex->_refcount++;
-
-    return 0;
+  mutex->_owner = self;
+  mutex->_refcount++;
+  if (mutex->_untrusted_wait_queue) {
+    enc_untrusted_enable_waiting(mutex->_untrusted_wait_queue);
   }
-
-  return EBUSY;
+  return 0;
 }
 
 // Read locks the given |rwlock| if possible and returns 0. On success,
-// pthread_self() is removed from |rwlock|._queue and |rwlock|._readers is
-// incremented. Returns EBUSY if the |rwlock| is write locked or pthread_self()
-// is not the front of |rwlock|._queue. |rwlock|._lock must be locked by the
-// caller.
+// |rwlock|._readers is incremented. Returns EBUSY if the |rwlock| is write
+// locked. |rwlock|._lock must be locked by the caller.
 int pthread_rwlock_tryrdlock_internal(pthread_rwlock_t *rwlock) {
   // If |rwlock| is owned by a writer it is not read lockable.
   if (rwlock->_write_owner != PTHREAD_T_NULL) {
     return EBUSY;
   }
 
-  asylo::pthread_impl::QueueOperations queue(rwlock);
-  const pthread_t self = pthread_self();
-
-  // If the current thread is at the front of the queue or the queue is empty
-  // |rwlock| is read lockable.
-  if (queue.Empty() || queue.Front() == self) {
-    queue.Dequeue();
-    rwlock->_reader_count++;
-
-    return 0;
+  rwlock->_reader_count++;
+#ifdef _ASYLO_PTHREAD_RWLOCK_TRANSITIONAL_FLAG
+  if (rwlock->_untrusted_wait_queue) {
+    enc_untrusted_enable_waiting(rwlock->_untrusted_wait_queue);
   }
-
-  return EBUSY;
+#endif
+  return 0;
 }
 
-// Writes locks the given |rwlock| if possible and returns 0. On success,
-// pthread_self() is removed from |rwlock|._queue and added to
-// |rwlock|._write_owner. Returns EBUSY if the |rwlock| is write locked, read
-// locked, or pthread_self() is not the front of |rwlock|._queue. |rwlock|._lock
-// must be locked by the caller.
+// Write locks the given |rwlock| if possible and returns 0. On success,
+// |rwlock|._write_owner is set to pthread_self().  Returns EBUSY if the
+// |rwlock| is write locked or read locked. |rwlock|._lock must be locked by the
+// caller.
 int pthread_rwlock_trywrlock_internal(pthread_rwlock_t *rwlock) {
   // If |rwlock| is owned by a reader it is not write lockable.
   if (rwlock->_reader_count != 0) {
@@ -184,17 +182,13 @@ int pthread_rwlock_trywrlock_internal(pthread_rwlock_t *rwlock) {
     return EBUSY;
   }
 
-  // If the current thread is at the front of the queue or the queue is empty
-  // |rwlock| is write lockable.
-  asylo::pthread_impl::QueueOperations queue(rwlock);
-  if (queue.Empty() || queue.Front() == self) {
-    queue.Dequeue();
-    rwlock->_write_owner = self;
-
-    return 0;
+  rwlock->_write_owner = self;
+#ifdef _ASYLO_PTHREAD_RWLOCK_TRANSITIONAL_FLAG
+  if (rwlock->_untrusted_wait_queue) {
+    enc_untrusted_enable_waiting(rwlock->_untrusted_wait_queue);
   }
-
-  return EBUSY;
+#endif
+  return 0;
 }
 
 // Small utility function to "convert" a return value into an errno value. The
@@ -216,7 +210,7 @@ asylo::ThreadManager::ThreadOptions CreateOptions(
     const pthread_attr_t *const attr) {
   asylo::ThreadManager::ThreadOptions options;
 
-  if (attr != nullptr && attr->detach_state == PTHREAD_CREATE_DETACHED) {
+  if (attr && attr->detach_state == PTHREAD_CREATE_DETACHED) {
     options.detached = true;
   }
 
@@ -228,32 +222,106 @@ asylo::ThreadManager::ThreadOptions CreateOptions(
 // pthread_rwlock_trywrlock_internal() respectively.
 template <int(TryLockFunc)(pthread_rwlock_t *)>
 int pthread_rwlock_lock(pthread_rwlock_t *rwlock) {
-  if (!asylo::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
     return ConvertToErrno(EFAULT);
   }
 
-  LockableGuard lock_guard(rwlock);
-  int ret = TryLockFunc(rwlock);
-  if (ret == 0) {
-    return 0;
+#ifdef _ASYLO_PTHREAD_RWLOCK_TRANSITIONAL_FLAG
+  if (!rwlock->_untrusted_wait_queue) {
+    LockableGuard lock_guard(rwlock);
+    initialize_wait_queue(&rwlock->_untrusted_wait_queue);
   }
+#endif
 
   const pthread_t self = pthread_self();
   asylo::pthread_impl::QueueOperations queue(rwlock);
-  if (queue.Contains(self)) {
-    return EDEADLK;
+  int ret = 0;
+  {
+    LockableGuard lock_guard(rwlock);
+    ret = TryLockFunc(rwlock);
+    if (ret == 0) {
+      return 0;
+    }
+    if (queue.Contains(self)) {
+      return EDEADLK;
+    }
   }
-  queue.Enqueue(self);
 
   while (ret == EBUSY) {
-    lock_guard.Unlock();
-    enc_untrusted_sched_yield();
-    lock_guard.Lock();
-
-    ret = TryLockFunc(rwlock);
+    for (int i = 0; i < kNumSpinLockAttempts; i++) {
+      {
+        LockableGuard lock_guard(rwlock);
+        ret = TryLockFunc(rwlock);
+        if (ret == 0) {
+          return 0;
+        }
+      }
+    }
+    {
+      LockableGuard lock_guard(rwlock);
+      queue.Enqueue(self);
+    }
+#ifdef _ASYLO_PTHREAD_RWLOCK_TRANSITIONAL_FLAG
+    if (rwlock->_untrusted_wait_queue) {
+      enc_untrusted_thread_wait(rwlock->_untrusted_wait_queue);
+    }
+#else
+    enc_pause();
+#endif
+    {
+      LockableGuard lock_guard(rwlock);
+      queue.Remove(self);
+    }
   }
 
   return ret;
+}
+
+void pthread_tsd_run_destructors() {
+  struct __pthread_info *self =
+      reinterpret_cast<struct __pthread_info *>(pthread_self());
+  pthread_rwlock_rdlock(&key_lock);
+  for (int i = 0; i < PTHREAD_KEYS_MAX; ++i) {
+    void *val = self->tsd[i];
+    void (*destructor)(void *) = tsd_destructors[i];
+    self->tsd[i] = nullptr;
+    if (val && destructor && destructor != NoDestructor) {
+      destructor(val);
+    }
+  }
+  pthread_rwlock_unlock(&key_lock);
+}
+
+struct start_args {
+  void *(*start_func)(void *);
+  void *start_arg;
+};
+
+int start(void *p) {
+  struct start_args *args = reinterpret_cast<struct start_args *>(p);
+  asylo::ThreadManager *const thread_manager =
+      asylo::ThreadManager::GetInstance();
+  thread_manager->UpdateThreadResult(pthread_self(),
+                                     args->start_func(args->start_arg));
+  pthread_tsd_run_destructors();
+  return 0;
+}
+
+// Allocate thread specific data for the calling thread if it hasn't yet been
+// allocated.
+bool CheckAndAllocateThreadSpecificData() {
+  auto self = reinterpret_cast<struct __pthread_info *>(pthread_self());
+  // This can only happen in the main thread or the threads created by the host
+  // entering the enclave.
+  if (!self->tsd) {
+    void *tsd = malloc(__pthread_tsd_size);
+    if (tsd == MAP_FAILED) {
+      return false;
+    }
+    memset(tsd, 0, __pthread_tsd_size);
+    self->tsd = reinterpret_cast<void **>(tsd);
+  }
+  return true;
 }
 
 }  // namespace
@@ -262,13 +330,13 @@ namespace asylo {
 namespace pthread_impl {
 
 QueueOperations::QueueOperations(__pthread_list_t *list) : list_(list) {
-  if (list_ == nullptr) {
+  if (!list_) {
     abort();
   }
 }
 
 void QueueOperations::Dequeue() {
-  if (list_->_first == nullptr) {
+  if (!list_->_first) {
     return;
   }
 
@@ -278,7 +346,7 @@ void QueueOperations::Dequeue() {
 }
 
 pthread_t QueueOperations::Front() const {
-  if (list_->_first == nullptr) {
+  if (!list_->_first) {
     return PTHREAD_T_NULL;
   }
   return list_->_first->_thread_id;
@@ -302,10 +370,10 @@ void QueueOperations::Enqueue(const pthread_t id) {
 bool QueueOperations::Remove(const pthread_t id) {
   __pthread_list_node_t *curr, *prev;
 
-  for (curr = list_->_first, prev = nullptr; curr != nullptr;
+  for (curr = list_->_first, prev = nullptr; curr;
        prev = curr, curr = curr->_next) {
     if (curr->_thread_id == id) {
-      if (prev == nullptr) {
+      if (!prev) {
         // Node to remove was the first item in the list. Change the list head.
         list_->_first = curr->_next;
       } else {
@@ -340,7 +408,7 @@ void QueueOperations::Clear() {
 
 bool QueueOperations::Empty() const {
   const __pthread_list_node_t *current = list_->_first;
-  return current == PTHREAD_T_NULL;
+  return current == nullptr;
 }
 
 }  //  namespace pthread_impl
@@ -360,10 +428,42 @@ pthread_t pthread_self() {
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                    void *(*start_routine)(void *), void *arg) {
-  asylo::ThreadManager *const thread_manager =
-      asylo::ThreadManager::GetInstance();
-  return thread_manager->CreateThread(std::bind(start_routine, arg),
-                                      CreateOptions(attr), thread);
+  // Store the __pthread_info and the start function in the TLS specified by
+  // pthread library, so it can be accessed by other pthread functions.
+  // The order is __pthread_info struct, then start function.
+  size_t size = sizeof(struct __pthread_info) + sizeof(struct start_args) +
+                __pthread_tsd_size;
+  void *tls = mmap(/*addr=*/nullptr, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON, /*fd=*/-1, /*offset=*/0);
+  if (tls == MAP_FAILED) {
+    return -1;
+  }
+  memset(tls, 0, size);
+  auto thread_data = reinterpret_cast<struct __pthread_info *>(tls);
+  thread_data->self = thread_data;
+  thread_data->tls_size = size;
+  pthread_attr_t pthread_attr = {0};
+  if (attr) {
+    pthread_attr = *attr;
+    thread_data->attr = &pthread_attr;
+  }
+
+  struct start_args *args = reinterpret_cast<struct start_args *>(
+      reinterpret_cast<uintptr_t>(tls) + sizeof(struct __pthread_info));
+  args->start_func = start_routine;
+  args->start_arg = arg;
+
+  void *tsd = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(tls) + size -
+                                       __pthread_tsd_size);
+  thread_data->tsd = reinterpret_cast<void **>(tsd);
+
+  pid_t parent_tid;
+  int ret = enclave_clone(start, /*stack=*/nullptr, CLONE_THREAD | CLONE_SETTLS,
+                          args, &parent_tid, tls, /*child_tid=*/nullptr);
+  if (thread) {
+    *thread = thread_data->thread_id;
+  }
+  return ret;
 }
 
 int pthread_join(pthread_t thread, void **value_ptr) {
@@ -378,35 +478,33 @@ int pthread_detach(pthread_t thread) {
   return thread_manager->DetachThread(thread);
 }
 
-bool assign_key(pthread_key_t *key) {
-  bool ret = false;
-  pthread_key_t next_key;
-  asylo::pthread_impl::PthreadMutexLock lock(&used_thread_keys_lock);
-  for (next_key = 0; next_key < PTHREAD_KEYS_MAX; next_key++) {
-    if (!used_thread_keys[next_key]) {
-      used_thread_keys[next_key] = true;
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) {
+  if (!CheckAndAllocateThreadSpecificData()) {
+    return -1;
+  }
+  if (!destructor) {
+    destructor = NoDestructor;
+  }
+  pthread_rwlock_wrlock(&key_lock);
+  for (pthread_key_t next_key = 0; next_key < PTHREAD_KEYS_MAX; ++next_key) {
+    if (!tsd_destructors[next_key]) {
+      tsd_destructors[next_key] = destructor;
       *key = next_key;
-      ret = true;
-      break;
+      pthread_rwlock_unlock(&key_lock);
+      return 0;
     }
   }
-  return ret;
-}
-
-int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) {
-  if (!assign_key(key)) {
-    // Limit on the total number of keys per process has been exceeded.
-    return EAGAIN;
-  }
-  return 0;
+  pthread_rwlock_unlock(&key_lock);
+  return EAGAIN;
 }
 
 int pthread_key_delete(pthread_key_t key) {
   if (key > PTHREAD_KEYS_MAX) {
     return EINVAL;
   }
-  asylo::pthread_impl::PthreadMutexLock lock(&used_thread_keys_lock);
-  used_thread_keys[key] = false;
+  pthread_rwlock_wrlock(&key_lock);
+  tsd_destructors[key] = nullptr;
+  pthread_rwlock_unlock(&key_lock);
   return 0;
 }
 
@@ -417,9 +515,11 @@ void *pthread_getspecific(pthread_key_t key) {
     return nullptr;
   }
 
-  // If the key is unset, this is to return nullptr. Because it is initialized
-  // to nullptr, there is no need to check if it has been previously set.
-  return const_cast<void *>(thread_specific[key]);
+  if (!CheckAndAllocateThreadSpecificData()) {
+    return nullptr;
+  }
+  auto self = reinterpret_cast<struct __pthread_info *>(pthread_self());
+  return self->tsd[key];
 }
 
 int pthread_setspecific(pthread_key_t key, const void *value) {
@@ -428,14 +528,17 @@ int pthread_setspecific(pthread_key_t key, const void *value) {
   if (key >= PTHREAD_KEYS_MAX) {
     return EINVAL;
   }
-
-  thread_specific[key] = value;
+  if (!CheckAndAllocateThreadSpecificData()) {
+    return -1;
+  }
+  auto self = reinterpret_cast<struct __pthread_info *>(pthread_self());
+  self->tsd[key] = const_cast<void *>(value);
   return 0;
 }
 // Initializes |mutex|, |attr| is unused.
 int pthread_mutex_init(pthread_mutex_t *mutex,
                        const pthread_mutexattr_t *attr) {
-  if (!asylo::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
     return EFAULT;
   }
 
@@ -445,7 +548,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
 
 // Destroys |mutex|, returns error if there are threads waiting on |mutex|.
 int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-  if (!asylo::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
     return EFAULT;
   }
 
@@ -465,22 +568,39 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
     return ret;
   }
 
+  const pthread_t self = pthread_self();
   asylo::pthread_impl::QueueOperations list(mutex);
-  {
+
+  if (!mutex->_untrusted_wait_queue) {
     LockableGuard lock_guard(mutex);
-    list.Enqueue(pthread_self());
+    // Ensure that the external wait queue is initialized
+    initialize_wait_queue(&mutex->_untrusted_wait_queue);
   }
 
   while (true) {
-    {
-      LockableGuard lock_guard(mutex);
-      ret = pthread_mutex_lock_internal(mutex);
+    for (int i = 0; i < kNumSpinLockAttempts; i++) {
+      {
+        LockableGuard lock_guard(mutex);
+        ret = pthread_mutex_lock_internal(mutex);
+      }
+      if (ret == 0) {
+        return ret;
+      }
     }
-    if (ret == 0) {
-      return ret;
+    // Sleep on an untrusted wait queue until woken up. Waiting will
+    // be enabled if the lock is held, as the holder of the lock is
+    // responsible for enabling and disabling waiting.
+    if (mutex->_untrusted_wait_queue) {
+      {
+        LockableGuard lock_guard(mutex);
+        list.Enqueue(self);
+      }
+      enc_untrusted_thread_wait(mutex->_untrusted_wait_queue);
+      {
+        LockableGuard lock_guard(mutex);
+        list.Remove(self);
+      }
     }
-
-    enc_untrusted_sched_yield();
   }
 }
 
@@ -492,7 +612,6 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex) {
 
   LockableGuard lock_guard(mutex);
   ret = pthread_mutex_lock_internal(mutex);
-
   return ret;
 }
 
@@ -503,21 +622,28 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
     return ret;
   }
 
-  const pthread_t self = pthread_self();
-
+  asylo::pthread_impl::QueueOperations list(mutex);
   LockableGuard lock_guard(mutex);
 
   if (mutex->_owner == PTHREAD_T_NULL) {
     return EINVAL;
   }
 
-  if (mutex->_owner != self) {
+  if (mutex->_owner != pthread_self()) {
     return EPERM;
   }
 
   mutex->_refcount--;
+  // If we change state from locked to unlocked
   if (mutex->_refcount == 0) {
     mutex->_owner = PTHREAD_T_NULL;
+    if (mutex->_untrusted_wait_queue) {
+      enc_untrusted_disable_waiting(mutex->_untrusted_wait_queue);
+      // Only notify if there is a thread to notify
+      if (!list.Empty()) {
+        enc_untrusted_notify(mutex->_untrusted_wait_queue);
+      }
+    }
   }
 
   return 0;
@@ -535,7 +661,7 @@ int pthread_once(pthread_once_t *once, void (*init_routine)(void)) {
 
 // Initializes |cond|, |attr| is unused.
 int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr) {
-  if (!asylo::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
     return EFAULT;
   }
 
@@ -545,14 +671,8 @@ int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr) {
 
 // Destroys |cond|, errors if there are threads waiting on |cond|.
 int pthread_cond_destroy(pthread_cond_t *cond) {
-  if (!asylo::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
     return EFAULT;
-  }
-
-  LockableGuard lock_guard(cond);
-  asylo::pthread_impl::QueueOperations list(cond);
-  if (!list.Empty()) {
-    return EBUSY;
   }
 
   return 0;
@@ -569,22 +689,48 @@ int pthread_cond_destroy(pthread_cond_t *cond) {
 // never time out, acting like pthread_cond_wait().
 int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
                            const struct timespec *deadline) {
-  if (!asylo::IsValidEnclaveAddress<pthread_cond_t>(cond) ||
-      !asylo::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_cond_t>(cond) ||
+      !asylo::primitives::IsValidEnclaveAddress<pthread_mutex_t>(mutex)) {
     return EFAULT;
   }
 
   // If a deadline has been specified, ensure it is valid.
-  if (deadline != nullptr &&
-      !asylo::IsValidEnclaveAddress<timespec>(deadline)) {
+  if (deadline &&
+      !asylo::primitives::IsValidEnclaveAddress<timespec>(deadline)) {
     return EFAULT;
   }
 
+  // Get the current thread ID to use as a wait queue value, truncated
+  // to 32 bits to fit in the wait queue state.
   const pthread_t self = pthread_self();
 
+#ifdef _ASYLO_PTHREAD_COND_TRANSITIONAL_FLAG
+  // Use a global atomic counter to enumerate each thread. This generates a
+  // thread-specific 32 bit unique identifier for each thread, which is not the
+  // address of anything, and thus safer to expose outside the enclave (relative
+  // to some implementations of pthread_self()).
+  static std::atomic<int32_t> thread_counter(1);
+  thread_local int32_t self_32 =
+      thread_counter.fetch_add(1, std::memory_order_relaxed);
+
+  if (!cond->_untrusted_wait_queue) {
+    // initialize wait queue
+    LockableGuard lock_guard(cond);
+    initialize_wait_queue(&cond->_untrusted_wait_queue);
+  }
+#endif
+
   asylo::pthread_impl::QueueOperations list(cond);
+  // Store a thread-specific unique ID to the wait queue. This allows wait to be
+  // atomic, as any other thread signalling a wakeup will overwrite this value
+  // with a different thread unique ID, disabling this thread from sleeping.
   {
     LockableGuard lock_guard(cond);
+#ifdef _ASYLO_PTHREAD_COND_TRANSITIONAL_FLAG
+    if (cond->_untrusted_wait_queue) {
+      enc_untrusted_wait_queue_set_value(cond->_untrusted_wait_queue, self_32);
+    }
+#endif
     list.Enqueue(self);
   }
 
@@ -593,11 +739,67 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
     return ret;
   }
 
+#ifdef _ASYLO_PTHREAD_COND_TRANSITIONAL_FLAG
+  // A wait for 0 microseconds will actually wait indefinitely.
+  uint64_t time_left_micros = 0;
+  if (deadline) {
+    timespec curr_time;
+    ret = clock_gettime(CLOCK_REALTIME, &curr_time);
+    if (ret != 0) {
+      pthread_mutex_lock(mutex);
+      return ret;
+    }
+
+    // TimeSpecSubtract returns true if deadline < curr_time.
+    timespec time_left;
+    if (asylo::TimeSpecSubtract(*deadline, curr_time, &time_left)) {
+      pthread_mutex_lock(mutex);
+      return ETIMEDOUT;
+    }
+    time_left_micros = asylo::TimeSpecToMicroseconds(&time_left);
+
+    // Timeout if we're exactly at the deadline. Otherwise we'd sleep for 0
+    // microseconds, which is an indefinite sleep.
+    if (time_left_micros == 0) {
+      pthread_mutex_lock(mutex);
+      return ETIMEDOUT;
+    }
+  }
+  // Sleep on the wait queue until either the timeout occurs, or a wakeup
+  // occurs.
+  if (cond->_untrusted_wait_queue) {
+    enc_untrusted_thread_wait_value(cond->_untrusted_wait_queue, self_32,
+                                    time_left_micros);
+  }
+  {
+    LockableGuard lock_guard(cond);
+    list.Remove(self);
+  }
+
+  if (deadline) {
+    // Check if awoken up due to timeout.
+    timespec curr_time;
+    ret = clock_gettime(CLOCK_REALTIME, &curr_time);
+    if (ret != 0) {
+      pthread_mutex_lock(mutex);
+      return ret;
+    }
+
+    // TimeSpecSubtract returns true if deadline < curr_time.
+    timespec time_left;
+    if (asylo::TimeSpecSubtract(*deadline, curr_time, &time_left)) {
+      pthread_mutex_lock(mutex);
+      return ETIMEDOUT;
+    }
+  }
+
+  return pthread_mutex_lock(mutex);
+#else
   while (true) {
     enc_untrusted_sched_yield();
 
     // If a deadline has been specified, check to see if it has passed.
-    if (deadline != nullptr) {
+    if (deadline) {
       timespec curr_time;
       ret = clock_gettime(CLOCK_REALTIME, &curr_time);
       if (ret != 0) {
@@ -617,6 +819,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
       break;
     }
   }
+
   {
     LockableGuard lock_guard(cond);
     list.Remove(self);
@@ -631,6 +834,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
     return ret;
   }
   return relock_ret;
+#endif
 }
 
 // Blocks until the given |cond| is signaled or broadcasted. |mutex| must  be
@@ -643,42 +847,51 @@ int pthread_condattr_init(pthread_condattr_t *attr) { return 0; }
 
 int pthread_condattr_destroy(pthread_condattr_t *attr) { return 0; }
 
-// Wakes the first waiting thread on |cond|.
-int pthread_cond_signal(pthread_cond_t *cond) {
-  if (!asylo::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
+// Wakes |num_threads| waiting on |cond|.
+int pthread_cond_notify_internal(pthread_cond_t *cond, int num_threads) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
     return EFAULT;
   }
 
+#ifdef _ASYLO_PTHREAD_COND_TRANSITIONAL_FLAG
+  // If there is no queue, there is no way for other threads to be asleep on
+  // that queue, and thus there is nothing to do.
+  if (cond->_untrusted_wait_queue != nullptr) {
+    asylo::pthread_impl::QueueOperations list(cond);
+    const int32_t self = static_cast<int32_t>(pthread_self());
+    LockableGuard lock_guard(cond);
+    enc_untrusted_wait_queue_set_value(cond->_untrusted_wait_queue, self);
+    if (!list.Empty()) {
+      enc_untrusted_notify(cond->_untrusted_wait_queue, num_threads);
+    }
+  }
+#else
   LockableGuard lock_guard(cond);
   asylo::pthread_impl::QueueOperations list(cond);
-  if (list.Empty()) {
-    return 0;
+  if (num_threads == 1 && !list.Empty()) {
+    list.Dequeue();
+  } else {
+    // only called with 1 and INT_MAX
+    list.Clear();
   }
-
-  list.Dequeue();
-
+#endif
   return 0;
+}
+
+// Wakes the first waiting thread on |cond|.
+int pthread_cond_signal(pthread_cond_t *cond) {
+  return pthread_cond_notify_internal(cond, 1);
 }
 
 // Wakes all the waiting threads on |cond|.
 int pthread_cond_broadcast(pthread_cond_t *cond) {
-  if (!asylo::IsValidEnclaveAddress<pthread_cond_t>(cond)) {
-    return EFAULT;
-  }
-
-  asylo::pthread_impl::QueueOperations list(cond);
-  {
-    LockableGuard lock_guard(cond);
-    list.Clear();
-  }
-
-  return 0;
+  return pthread_cond_notify_internal(cond, INT_MAX);
 }
 
 // Initialize |sem| with an initial semaphore value of |value|. |pshared| must
 // be 0; shared semaphores are not supported.
 int sem_init(sem_t *sem, const int pshared, const unsigned int value) {
-  if (!asylo::IsValidEnclaveAddress<sem_t>(sem)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<sem_t>(sem)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -704,8 +917,8 @@ int sem_init(sem_t *sem, const int pshared, const unsigned int value) {
 
 // Get the current value of |sem| and write it to |sval|.
 int sem_getvalue(sem_t *sem, int *sval) {
-  if (!asylo::IsValidEnclaveAddress<sem_t>(sem) ||
-      !asylo::IsValidEnclaveAddress<int>(sval)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<sem_t>(sem) ||
+      !asylo::primitives::IsValidEnclaveAddress<int>(sval)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -716,7 +929,7 @@ int sem_getvalue(sem_t *sem, int *sval) {
 
 // Unlock |sem|, unblocking a thread that might be waiting for it.
 int sem_post(sem_t *sem) {
-  if (!asylo::IsValidEnclaveAddress<sem_t>(sem)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<sem_t>(sem)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -730,12 +943,12 @@ int sem_post(sem_t *sem) {
 // been unlocked. Returns -1 on err. errno will be set to ETIMEDOUT if the
 // failure is due to a timeout.
 int sem_timedwait(sem_t *sem, const timespec *abs_timeout) {
-  if (!asylo::IsValidEnclaveAddress<sem_t>(sem)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<sem_t>(sem)) {
     return ConvertToErrno(EFAULT);
   }
 
-  if (abs_timeout != nullptr &&
-      !asylo::IsValidEnclaveAddress<timespec>(abs_timeout)) {
+  if (abs_timeout &&
+      !asylo::primitives::IsValidEnclaveAddress<timespec>(abs_timeout)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -776,7 +989,7 @@ int sem_trywait(sem_t *sem) {
 }
 
 int sem_destroy(sem_t *sem) {
-  if (!asylo::IsValidEnclaveAddress<sem_t>(sem)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<sem_t>(sem)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -795,7 +1008,7 @@ int sem_destroy(sem_t *sem) {
 
 int pthread_rwlock_init(pthread_rwlock_t *rwlock,
                         const pthread_rwlockattr_t *attr) {
-  if (!asylo::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -805,7 +1018,7 @@ int pthread_rwlock_init(pthread_rwlock_t *rwlock,
 }
 
 int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock) {
-  if (!asylo::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -814,7 +1027,7 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock) {
 }
 
 int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock) {
-  if (!asylo::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -831,24 +1044,41 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock) {
 }
 
 int pthread_rwlock_unlock(pthread_rwlock_t *rwlock) {
-  if (!asylo::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
     return ConvertToErrno(EFAULT);
   }
 
+  asylo::pthread_impl::QueueOperations list(rwlock);
   LockableGuard lock_guard(rwlock);
 
   const pthread_t self = pthread_self();
   if (rwlock->_write_owner == self) {
     rwlock->_write_owner = PTHREAD_T_NULL;
+#ifdef _ASYLO_PTHREAD_RWLOCK_TRANSITIONAL_FLAG
+    if (rwlock->_untrusted_wait_queue) {
+      enc_untrusted_disable_waiting(rwlock->_untrusted_wait_queue);
+      if (!list.Empty()) {
+        enc_untrusted_notify(rwlock->_untrusted_wait_queue);
+      }
+    }
+#endif
     return 0;
   }
 
   rwlock->_reader_count--;
+#ifdef _ASYLO_PTHREAD_RWLOCK_TRANSITIONAL_FLAG
+  if (rwlock->_reader_count == 0 && rwlock->_untrusted_wait_queue) {
+    enc_untrusted_disable_waiting(rwlock->_untrusted_wait_queue);
+    if (!list.Empty()) {
+      enc_untrusted_notify(rwlock->_untrusted_wait_queue);
+    }
+  }
+#endif
   return 0;
 }
 
 int pthread_rwlock_destroy(pthread_rwlock_t *rwlock) {
-  if (!asylo::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_rwlock_t>(rwlock)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -889,7 +1119,7 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *mutexattr, int type) {
 }
 
 int pthread_attr_init(pthread_attr_t *attr) {
-  if (!asylo::IsValidEnclaveAddress<pthread_attr_t>(attr)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_attr_t>(attr)) {
     return ConvertToErrno(EFAULT);
   }
 
@@ -898,14 +1128,14 @@ int pthread_attr_init(pthread_attr_t *attr) {
 }
 
 int pthread_attr_destroy(pthread_attr_t *attr) {
-  if (!asylo::IsValidEnclaveAddress<pthread_attr_t>(attr)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_attr_t>(attr)) {
     return ConvertToErrno(EFAULT);
   }
   return 0;
 }
 
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int type) {
-  if (!asylo::IsValidEnclaveAddress<pthread_attr_t>(attr)) {
+  if (!asylo::primitives::IsValidEnclaveAddress<pthread_attr_t>(attr)) {
     return ConvertToErrno(EFAULT);
   }
 

@@ -25,12 +25,19 @@
 #include "absl/flags/parse.h"
 #include "asylo/bazel/test_shim_enclave.pb.h"
 #include "asylo/client.h"
+#include "asylo/enclave.pb.h"
 #include "asylo/util/logging.h"
+#include "asylo/platform/primitives/sgx/loader.pb.h"
 #include "asylo/test/util/test_flags.h"
 
 ABSL_FLAG(std::string, enclave_path, "", "Path to enclave to load");
 ABSL_FLAG(bool, test_in_initialize, false,
           "Run tests in Initialize, rather than Run");
+ABSL_FLAG(std::string, benchmarks, "",
+          "A regular expression that specifies the set of benchmarks "
+          "to execute.  If this flag is empty, no benchmarks are run. "
+          "If this flag is the string \"all\", all benchmarks linked "
+          "into the process are run.");
 ABSL_FLAG(int32_t, v, 0, "Logging verbosity level");
 
 namespace {
@@ -64,6 +71,9 @@ int main(int argc, char *argv[]) {
       config.MutableExtension(asylo::test_shim_enclave_config);
   shim_config->set_test_in_initialize(absl::GetFlag(FLAGS_test_in_initialize));
 
+  // Pass the value of the benchmarks flag to the enclave.
+  shim_config->set_benchmarks(absl::GetFlag(FLAGS_benchmarks));
+
   // Load the enclave
   asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
   auto manager_result = asylo::EnclaveManager::Instance();
@@ -71,8 +81,23 @@ int main(int argc, char *argv[]) {
     LOG(QFATAL) << "Instance returned status: " << manager_result.status();
   }
   asylo::EnclaveManager *manager = manager_result.ValueOrDie();
-  asylo::SgxLoader loader(absl::GetFlag(FLAGS_enclave_path), /*debug*/ true);
-  asylo::Status status = manager->LoadEnclave(kEnclaveName, loader, config);
+
+  // Create an EnclaveLoadConfig object.
+  asylo::EnclaveLoadConfig load_config;
+  load_config.set_name(kEnclaveName);
+  *load_config.mutable_config() = config;
+
+  // Create an SgxLoadConfig object.
+  asylo::SgxLoadConfig sgx_config;
+  asylo::SgxLoadConfig::FileEnclaveConfig file_enclave_config;
+  file_enclave_config.set_enclave_path(absl::GetFlag(FLAGS_enclave_path));
+  *sgx_config.mutable_file_enclave_config() = file_enclave_config;
+  sgx_config.set_debug(true);
+
+  // Set an SGX message extension to load_config.
+  *load_config.MutableExtension(asylo::sgx_load_config) = sgx_config;
+
+  asylo::Status status = manager->LoadEnclave(load_config);
   if (!status.ok()) {
     LOG(QFATAL) << "LoadEnclave returned status: " << status;
   }

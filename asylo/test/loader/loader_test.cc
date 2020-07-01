@@ -48,12 +48,6 @@ class TestClient : public EnclaveClient {
     return Status::OkStatus();
   }
 
-  Status EnterAndDonateThread() override { return Status::OkStatus(); }
-
-  Status EnterAndHandleSignal(const EnclaveSignal &signum) override {
-    return Status::OkStatus();
-  }
-
   Status DestroyEnclave() override { return Status::OkStatus(); }
 };
 
@@ -61,14 +55,15 @@ class TestClient : public EnclaveClient {
 class FailingLoader : public EnclaveLoader {
  protected:
   StatusOr<std::unique_ptr<EnclaveClient>> LoadEnclave(
-      const std::string &name, void *base_address, const size_t enclave_size,
+      absl::string_view name, void *base_address, const size_t enclave_size,
       const EnclaveConfig &config) const override {
     return Status(error::GoogleError::INVALID_ARGUMENT,
                   "Could not load enclave.");
   }
-  StatusOr<std::unique_ptr<EnclaveLoader>> Copy() const override {
-    return Status(error::GoogleError::INVALID_ARGUMENT,
-                  "Could not get self loader.");
+
+  EnclaveLoadConfig GetEnclaveLoadConfig() const override {
+    EnclaveLoadConfig loader_config;
+    return loader_config;
   }
 };
 
@@ -82,14 +77,14 @@ class FakeLoader : public EnclaveLoader {
 
  protected:
   StatusOr<std::unique_ptr<EnclaveClient>> LoadEnclave(
-      const std::string &name, void *base_address, const size_t enclave_size,
+      absl::string_view name, void *base_address, const size_t enclave_size,
       const EnclaveConfig &config) const override {
     return std::unique_ptr<EnclaveClient>(new T());
   }
 
-  StatusOr<std::unique_ptr<EnclaveLoader>> Copy() const override {
-    return Status(error::GoogleError::INVALID_ARGUMENT,
-                  "Could not get self loader.");
+  EnclaveLoadConfig GetEnclaveLoadConfig() const override {
+    EnclaveLoadConfig loader_config;
+    return loader_config;
   }
 };
 

@@ -32,11 +32,13 @@
 #include "absl/flags/parse.h"
 #include "absl/strings/str_split.h"
 #include "asylo/client.h"
-#include "asylo/examples/hello_mig/hello.pb.h"
+#include "asylo/enclave.pb.h"
+#include "asylo/examples/hello_world/hello.pb.h"
 #include "asylo/util/logging.h"
+#include "asylo/platform/primitives/sgx/loader.pb.h"
 
-#include "asylo/platform/arch/fork.pb.h"
 #include "asylo/platform/common/memory.h"
+#include "asylo/platform/primitives/sgx/fork.ph.h"
 
 ABSL_FLAG(std::string, enclave_path, "", "Path to enclave to load");
 ABSL_FLAG(std::string, names, "",
@@ -69,15 +71,15 @@ void initiate_enclave(int signo) {
   int wstatus;
   int pid = fork();
   if (pid < 0) {
-	LOG(FATAL) <<"fork failed";
+        LOG(FATAL) <<"fork failed";
   } else if (pid == 0) {
-	pid = fork();
+        pid = fork();
 
-	if (pid < 0) {
-	  LOG(FATAL) <<"fork failed";
-	} else if (pid > 0) {
-		// wait a second for restarting aesmd service exec
-	  sleep(1);
+        if (pid < 0) {
+          LOG(FATAL) <<"fork failed";
+        } else if (pid > 0) {
+                // wait a second for restarting aesmd service exec
+          sleep(1);
       asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
       auto manager_result = asylo::EnclaveManager::Instance();
       if (!manager_result.ok()) {
@@ -94,14 +96,14 @@ void initiate_enclave(int signo) {
       exit(0);
       // never reach here
       return;
-	} else {
-		// child exec. restart aesmd service
+        } else {
+                // child exec. restart aesmd service
         execl("/usr/bin/sudo", "sudo", "service", "aesmd", "restart", 0);
-		exit(0);
-	}
+                exit(0);
+        }
 
   } else {
-	// wait until child completes
+        // wait until child completes
     waitpid(pid, &wstatus, NULL);
     exit(0);
   }
@@ -109,7 +111,7 @@ void initiate_enclave(int signo) {
 
 // callback for SIGSNAPSHOT
 void mig_handler(int signo) {
-
+  LOG(INFO) <<"This is 1st debugging message. If you see this message, please delete it.";
   gettimeofday(&tv, NULL);
   LOG(INFO) << "(" << getpid() << ") SIGSNAPSHOT recv'd: Taking snapshot";
 
@@ -117,9 +119,9 @@ void mig_handler(int signo) {
     //Take snapshot
     asylo::Status status = client->InitiateMigration();
     status = client->EnterAndTakeSnapshot(&layout);
-	if (!status.ok()) {
-	  LOG(QFATAL) << "InitiateMigration failed";
-	}
+        if (!status.ok()) {
+          LOG(QFATAL) << "InitiateMigration failed";
+        }
   }
 
     asylo::ForkHandshakeConfig fconfig;
@@ -127,13 +129,13 @@ void mig_handler(int signo) {
     fconfig.set_socket(0);
     asylo::Status status = client->EnterAndTransferSecureSnapshotKey(fconfig);
     if (!status.ok()) {
-		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
+                LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
     }
 
 }
 
 void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
-
+  LOG(INFO) <<"This is 2nd debugging message. If you see this message, please delete it.";
   asylo::Status status;
   // Part 1: Initialization
   asylo::EnclaveLoader *loader = manager->GetLoaderFromClient(client);
@@ -157,12 +159,12 @@ void ReloadEnclave(asylo::EnclaveManager *manager, void *base, size_t size) {
     return ;
   } else {
     asylo::Status status = client->InitiateMigration();
-	LOG(INFO) << "Reloaded Enclave "<< absl::GetFlag(FLAGS_enclave_path) ;
+        LOG(INFO) << "Reloaded Enclave "<< absl::GetFlag(FLAGS_enclave_path) ;
   }
 }
 
 void ResumeExecution(asylo::EnclaveManager *manager) {
-
+  LOG(INFO) <<"This is 3rd debugging message. If you see this message, please delete it.";
   asylo::Status status;
   client->SetProcessId();
   asylo::ForkHandshakeConfig fconfig;
@@ -170,10 +172,9 @@ void ResumeExecution(asylo::EnclaveManager *manager) {
   fconfig.set_socket(0);
   status = client->EnterAndTransferSecureSnapshotKey(fconfig);
   if (!status.ok()) {
-		LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
+                LOG(ERROR) << status << " (" << getpid() << ") Failed to deliver SnapshotKey";
   } else {
-
-	LOG(INFO) << "EnterAndRestore";
+        LOG(INFO) << "EnterAndRestore";
     status = client->EnterAndRestore(layout);
     if (!status.ok()) {
       LOG(ERROR) << status << "Enclave restore failed & resume from the beginning";
@@ -230,6 +231,8 @@ void Destroy(asylo::EnclaveManager *manager) {
   status = manager->DestroyEnclave(client, final_input, 0);
 }
 
+
+
 int main(int argc, char *argv[]) {
 
   g_argc = argc;
@@ -243,6 +246,7 @@ int main(int argc, char *argv[]) {
   memset(&new_mig_sa, 0, sizeof(new_sa));
   new_mig_sa.sa_handler = initiate_enclave; // called when the signal is triggered
   sigaction(SIGUSR1, &new_mig_sa, &old_mig_sa);
+
 
   // Part 0: Setup
   absl::ParseCommandLine(argc, argv);
@@ -267,18 +271,32 @@ int main(int argc, char *argv[]) {
   config.set_enable_fork(true);
   config.set_enable_migration(true);
 
-  asylo::SgxLoader loader(absl::GetFlag(FLAGS_enclave_path), /*debug=*/true);
-  asylo::Status status = manager->LoadEnclave("hello_enclave", loader, config);
+
+  // Create an EnclaveLoadConfig object.
+  asylo::EnclaveLoadConfig load_config;
+  load_config.set_name("hello_enclave");
+
+  // Create an SgxLoadConfig object.
+  asylo::SgxLoadConfig sgx_config;
+  asylo::SgxLoadConfig::FileEnclaveConfig file_enclave_config;
+  file_enclave_config.set_enclave_path(absl::GetFlag(FLAGS_enclave_path));
+  *sgx_config.mutable_file_enclave_config() = file_enclave_config;
+  sgx_config.set_debug(true);
+
+  // Set an SGX message extension to load_config.
+  *load_config.MutableExtension(asylo::sgx_load_config) = sgx_config;
+  asylo::Status status = manager->LoadEnclave(load_config);
   if (!status.ok()) {
     LOG(QFATAL) << "Load " << absl::GetFlag(FLAGS_enclave_path)
                 << " failed: " << status;
   }
 
   // Part 2: Secure execution
-  client = reinterpret_cast<asylo::SgxClient *>(manager->GetClient("hello_enclave"));
 
+  client = reinterpret_cast<asylo::SgxClient *>(manager->GetClient("hello_enclave"));
   enc_base = client->base_address();
   enc_size = client->size();
+
 
   for (const auto &name : names) {
     asylo::EnclaveInput input;

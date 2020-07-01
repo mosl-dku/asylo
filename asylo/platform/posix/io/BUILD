@@ -14,15 +14,17 @@
 # limitations under the License.
 #
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load(
     "//asylo/bazel:asylo.bzl",
-    "ASYLO_ALL_BACKENDS",
+    "ASYLO_ALL_BACKEND_TAGS",
     "cc_enclave_test",
     "cc_test",
-    "sgx_enclave_test",
+    "cc_unsigned_enclave",
+    "debug_sign_enclave",
+    "enclave_test",
 )
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
-load("@linux_sgx//:sgx_sdk.bzl", "sgx_enclave")
 
 licenses(["notice"])  # Apache v2.0
 
@@ -56,16 +58,15 @@ cc_library(
     ],
     copts = ASYLO_DEFAULT_COPTS,
     linkstatic = 1,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         ":util",
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/common:bridge_proto_serializer",
+        "//asylo:secure_storage",
         "//asylo/platform/common:memory",
-        "//asylo/platform/core:bridge_msghdr_wrapper",
-        "//asylo/platform/core:untrusted_cache_malloc",
         "//asylo/platform/crypto/gcmlib:gcm_cryptor",
         "//asylo/platform/crypto/gcmlib:trusted_gcmlib",
+        "//asylo/platform/host_call",
+        "//asylo/platform/host_call:serializer_functions",
         "//asylo/platform/primitives:trusted_backend",
         "//asylo/platform/storage/secure:aead_handler",
         "//asylo/platform/storage/secure:enclave_storage_secure",
@@ -74,12 +75,11 @@ cc_library(
         "@boringssl//:crypto",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
     ],
+    alwayslink = 1,
 )
 
 cc_library(
@@ -99,9 +99,14 @@ cc_enclave_test(
     srcs = ["read_write_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        "//asylo:secure_storage",
+        "//asylo/platform/common:memory",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_flags",
         "//asylo/util:cleansing_types",
+        "//asylo/util:logging",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
@@ -128,12 +133,15 @@ cc_enclave_test(
     srcs = ["read_write_multithread_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        "//asylo/platform/common:memory",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_flags",
         "//asylo/util:cleanup",
         "//asylo/util:logging",
+        "//asylo/util:status",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -146,6 +154,8 @@ cc_enclave_test(
     deps = [
         ":io_manager",
         "//asylo/test/util:status_matchers",
+        "//asylo/util:logging",
+        "//asylo/util:status",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
@@ -159,7 +169,9 @@ cc_enclave_test(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":io_manager",
+        "//asylo/platform/storage/utils:fd_closer",
         "//asylo/test/util:test_flags",
+        "@boringssl//:crypto",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
@@ -171,6 +183,7 @@ cc_test(
     srcs = ["epoll_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     enclave_test_name = "epoll_enclave_test",
+    tags = ["noregression"],
     deps = [
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
@@ -193,8 +206,8 @@ cc_test(
 )
 
 # Test enclave for routing standard streams to host file descriptors.
-sgx_enclave(
-    name = "test_pipe.so",
+cc_unsigned_enclave(
+    name = "test_pipe_unsigned.so",
     srcs = ["pipe_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
@@ -203,7 +216,12 @@ sgx_enclave(
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "test_pipe.so",
+    unsigned = "test_pipe_unsigned.so",
+)
+
+enclave_test(
     name = "pipe_test",
     srcs = ["pipe_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,

@@ -20,16 +20,6 @@
 
 namespace asylo {
 
-namespace {
-
-constexpr int64_t kMicrosecondsPerSecond = INT64_C(1000000);
-constexpr int64_t kNanosecondsPerMicrosecond = INT64_C(1000);
-constexpr int64_t kNanosecondsPerSecond = INT64_C(1000000000);
-constexpr int64_t kFirstRepresentableSecond = INT64_MIN / kNanosecondsPerSecond;
-constexpr int64_t kLastRepresentableSecond = INT64_MAX / kNanosecondsPerSecond;
-
-}  // namespace
-
 bool IsRepresentableAsNanoseconds(const struct timespec *ts) {
   return ts->tv_sec > kFirstRepresentableSecond &&
          ts->tv_sec < kLastRepresentableSecond;
@@ -72,6 +62,15 @@ int64_t TimeValToNanoseconds(const timeval *tv) {
          tv->tv_usec * kNanosecondsPerMicrosecond;
 }
 
+int64_t TimeSpecToMicroseconds(const timespec *ts) {
+  return ts->tv_sec * kMicrosecondsPerSecond +
+         ts->tv_nsec / kNanosecondsPerMicrosecond;
+}
+
+int64_t TimeValToMicroseconds(const timeval *tv) {
+  return tv->tv_sec * kMicrosecondsPerSecond + tv->tv_usec;
+}
+
 timespec *NanosecondsToTimeSpec(timespec *ts, int64_t nanosecs) {
   ts->tv_sec = nanosecs / kNanosecondsPerSecond;
   ts->tv_nsec = nanosecs % kNanosecondsPerSecond;
@@ -82,6 +81,29 @@ timeval *NanosecondsToTimeVal(timeval *tv, int64_t nanosecs) {
   tv->tv_sec = nanosecs / kNanosecondsPerSecond;
   tv->tv_usec = nanosecs / kNanosecondsPerMicrosecond % kMicrosecondsPerSecond;
   return tv;
+}
+
+timespec *MicrosecondsToTimeSpec(timespec *ts, int64_t microsecs) {
+  ts->tv_sec = microsecs / kMicrosecondsPerSecond;
+  ts->tv_nsec =
+      (microsecs % kMicrosecondsPerSecond) * kNanosecondsPerMicrosecond;
+  return ts;
+}
+
+timeval *MicrosecondsToTimeVal(timeval *tv, int64_t microsecs) {
+  tv->tv_sec = microsecs / kMicrosecondsPerSecond;
+  tv->tv_usec = microsecs % kMicrosecondsPerSecond;
+  return tv;
+}
+
+int64_t TimeValDiffInMicroseconds(const timeval *end, const timeval *start) {
+  return kMicrosecondsPerSecond * (end->tv_sec - start->tv_sec) + end->tv_usec -
+         end->tv_usec;
+}
+
+int64_t TimeSpecDiffInNanoseconds(const timespec *end, const timespec *start) {
+  return kNanosecondsPerSecond * (end->tv_sec - start->tv_sec) + end->tv_nsec -
+         start->tv_nsec;
 }
 
 }  // namespace asylo

@@ -25,8 +25,8 @@
 extern "C" {
 #endif
 
-// The maximum number of CPUs we support. Should match BRIDGE_CPU_SETSIZE in
-// third_party/asylo/platform/common/bridge_types.h.
+// The maximum number of CPUs we support. Should match KLINUX_CPU_SET_MAX_CPUS
+// in asylo/platform/system_call/type_conversions/kernel_types.h.
 #define CPU_SET_MAX_CPUS 1024
 
 typedef uint64_t CpuSetWord;
@@ -48,7 +48,7 @@ void CpuSetAddBit(int cpu, CpuSet *set);
 
 void CpuSetClearBit(int cpu, CpuSet *set);
 
-int CpuSetCheckBit(int cpu, CpuSet *set);
+int CpuSetCheckBit(int cpu, const CpuSet *set);
 
 int CpuSetCountBits(CpuSet *set);
 

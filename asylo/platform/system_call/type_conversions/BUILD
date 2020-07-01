@@ -14,9 +14,16 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load(
+    "//asylo/bazel:asylo.bzl",
+    "cc_enclave_test",
+    "cc_test_and_cc_enclave_test",
+)
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = ["//asylo:implementation"],
@@ -69,7 +76,6 @@ cc_binary(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         "//asylo/util:logging",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
         "@com_google_absl//absl/strings",
@@ -94,7 +100,10 @@ genrule(
 # Library containing type definitions (generated or manually written).
 cc_library(
     name = "types_definitions",
-    hdrs = ["generated_types.h"],
+    hdrs = [
+        "generated_types.h",
+        "kernel_types.h",
+    ],
     copts = ASYLO_DEFAULT_COPTS,
     deps = ["@com_google_absl//absl/base:core_headers"],
 )
@@ -111,17 +120,17 @@ cc_library(
         "generated_types_functions.h",
         "manual_types_functions.h",
     ],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [":types_definitions"],
+    copts = ASYLO_DEFAULT_COPTS + ["-D_GNU_SOURCE"],
+    deps = [
+        ":types_definitions",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
-# Tests for generated and manually written type conversion functions.
-cc_test(
-    name = "types_functions_test",
-    srcs = [
-        "generated_types_functions_test.cc",
-        "manual_types_functions_test.cc",
-    ],
+# Tests generated conversion functions on the host and inside the enclave.
+cc_test_and_cc_enclave_test(
+    name = "generated_types_functions_test",
+    srcs = ["generated_types_functions_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":types_functions",
@@ -131,12 +140,37 @@ cc_test(
     ],
 )
 
+# Tests whether manually written kernel types match the native types on the
+# host.
+cc_test(
+    name = "kernel_types_test",
+    srcs = ["kernel_types_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":types_functions",
+        "//asylo/test/util:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+# Tests the manually written type conversion functions inside the enclave.
+cc_enclave_test(
+    name = "manual_types_functions_test",
+    srcs = ["manual_types_functions_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":types_functions",
+        "//asylo/test/util:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
 # Library containing the type definitions and type conversion functions
-# between newlib and the target host implementation. This library contains
-# both the auto-generated as well as manually written type definitions and
-# type conversion functions.
+# between enclave C library implementation and the target host implementation.
+# This library contains both the auto-generated as well as manually written
+# type definitions and type conversion functions.
 cc_library(
-    name = "types",
+    name = "type_conversions",
     hdrs = [
         "types.h",
         "types_functions.h",

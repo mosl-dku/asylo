@@ -20,15 +20,16 @@
 
 #include <fcntl.h>
 #include <poll.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <memory>
+#include <unordered_set>
 
 #include "absl/algorithm/container.h"
-#include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "asylo/platform/arch/include/trusted/host_calls.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 #include "asylo/platform/posix/io/io_context_epoll.h"
 #include "asylo/platform/posix/io/io_context_eventfd.h"
 #include "asylo/platform/posix/io/io_context_inotify.h"
@@ -328,13 +329,16 @@ int IOManager::Select(int nfds, fd_set *readfds, fd_set *writefds,
     return ret;
   }
 
-  // Add the returned fd_sets into absl::flat_hash_set.
-  absl::flat_hash_set<int> host_readfds_set, host_writefds_set,
+  // Add the returned fd_sets into an unordered set. IOManager is used in
+  // trusted contexts where system calls might not be available; avoid using
+  // absl based containers which may perform system calls.
+  std::unordered_set<int> host_readfds_set, host_writefds_set,
       host_exceptfds_set;
   for (int fd = 0; fd < nfds; ++fd) {
     std::shared_ptr<IOContext> context = fd_table_.Get(fd);
     if (context) {
       int host_fd = context->GetHostFileDescriptor();
+      if (host_fd < 0) continue;
       if (FD_ISSET(host_fd, &host_readfds)) {
         host_readfds_set.insert(host_fd);
       }
@@ -475,8 +479,13 @@ int IOManager::InotifyInit(bool non_block) {
 
 int IOManager::InotifyAddWatch(int fd, const char *pathname, uint32_t mask) {
   return CallWithContext(
-      fd, [pathname, mask](std::shared_ptr<IOContext> inotify_context) {
-        return inotify_context->InotifyAddWatch(pathname, mask);
+      fd, [this, pathname, mask](std::shared_ptr<IOContext> inotify_context) {
+        return CallWithHandler(
+            pathname, [inotify_context, mask](VirtualPathHandler *handler,
+                                              const char *canonical_path) {
+              return handler->InotifyAddWatch(inotify_context, canonical_path,
+                                              mask);
+            });
       });
 }
 
@@ -744,6 +753,61 @@ int IOManager::LStat(const char *pathname, struct stat *stat_buffer) {
   });
 }
 
+int IOManager::StatFs(const char *pathname, struct statfs *statfs_buffer) {
+  return CallWithHandler(pathname, [statfs_buffer](VirtualPathHandler *handler,
+                                                   const char *canonical_path) {
+    return handler->StatFs(canonical_path, statfs_buffer);
+  });
+}
+
+ssize_t IOManager::GetXattr(const char *path, const char *name, void *value,
+                            size_t size) {
+  return CallWithHandler(path, [name, value, size](VirtualPathHandler *handler,
+                                                   const char *canonical_path) {
+    return handler->GetXattr(canonical_path, name, value, size);
+  });
+}
+
+ssize_t IOManager::LGetXattr(const char *path, const char *name, void *value,
+                             size_t size) {
+  return CallWithHandler(path, [name, value, size](VirtualPathHandler *handler,
+                                                   const char *canonical_path) {
+    return handler->LGetXattr(canonical_path, name, value, size);
+  });
+}
+
+int IOManager::SetXattr(const char *path, const char *name, const void *value,
+                        size_t size, int flags) {
+  return CallWithHandler(
+      path, [name, value, size, flags](VirtualPathHandler *handler,
+                                       const char *canonical_path) {
+        return handler->SetXattr(canonical_path, name, value, size, flags);
+      });
+}
+
+int IOManager::LSetXattr(const char *path, const char *name, const void *value,
+                         size_t size, int flags) {
+  return CallWithHandler(
+      path, [name, value, size, flags](VirtualPathHandler *handler,
+                                       const char *canonical_path) {
+        return handler->LSetXattr(canonical_path, name, value, size, flags);
+      });
+}
+
+ssize_t IOManager::ListXattr(const char *path, char *list, size_t size) {
+  return CallWithHandler(path, [list, size](VirtualPathHandler *handler,
+                                            const char *canonical_path) {
+    return handler->ListXattr(canonical_path, list, size);
+  });
+}
+
+ssize_t IOManager::LListXattr(const char *path, char *list, size_t size) {
+  return CallWithHandler(path, [list, size](VirtualPathHandler *handler,
+                                            const char *canonical_path) {
+    return handler->LListXattr(canonical_path, list, size);
+  });
+}
+
 int IOManager::ChMod(const char *pathname, mode_t mode) {
   return CallWithHandler(pathname, [mode](VirtualPathHandler *handler,
                                           const char *canonical_path) {
@@ -804,6 +868,35 @@ int IOManager::FStat(int fd, struct stat *stat_buffer) {
   return CallWithContext(fd, [stat_buffer](std::shared_ptr<IOContext> context) {
     return context->FStat(stat_buffer);
   });
+}
+
+ssize_t IOManager::FGetXattr(int fd, const char *name, void *value,
+                             size_t size) {
+  return CallWithContext(
+      fd, [name, value, size](std::shared_ptr<IOContext> context) {
+        return context->FGetXattr(name, value, size);
+      });
+}
+
+int IOManager::FSetXattr(int fd, const char *name, const void *value,
+                         size_t size, int flags) {
+  return CallWithContext(
+      fd, [name, value, size, flags](std::shared_ptr<IOContext> context) {
+        return context->FSetXattr(name, value, size, flags);
+      });
+}
+
+ssize_t IOManager::FListXattr(int fd, char *list, size_t size) {
+  return CallWithContext(fd, [list, size](std::shared_ptr<IOContext> context) {
+    return context->FListXattr(list, size);
+  });
+}
+
+int IOManager::FStatFs(int fd, struct statfs *statfs_buffer) {
+  return CallWithContext(fd,
+                         [statfs_buffer](std::shared_ptr<IOContext> context) {
+                           return context->FStatFs(statfs_buffer);
+                         });
 }
 
 int IOManager::Isatty(int fd) {
@@ -888,13 +981,12 @@ int IOManager::GetRLimit(int resource, struct rlimit *rlim) {
     return -1;
   }
   switch (resource) {
-    case RLIMIT_NOFILE:
-      {
-        absl::ReaderMutexLock lock(&fd_table_lock_);
-        rlim->rlim_cur = fd_table_.get_maximum_fd_soft_limit();
-        rlim->rlim_max = fd_table_.get_maximum_fd_hard_limit();
-        return 0;
-      }
+    case RLIMIT_NOFILE: {
+      absl::ReaderMutexLock lock(&fd_table_lock_);
+      rlim->rlim_cur = fd_table_.get_maximum_fd_soft_limit();
+      rlim->rlim_max = fd_table_.get_maximum_fd_hard_limit();
+      return 0;
+    }
     default:
       errno = ENOSYS;
       return -1;
@@ -911,14 +1003,13 @@ int IOManager::SetRLimit(int resource, const struct rlimit *rlim) {
     return -1;
   }
   switch (resource) {
-    case RLIMIT_NOFILE:
-      {
-        absl::WriterMutexLock lock(&fd_table_lock_);
-        if (!fd_table_.SetFileDescriptorLimits(rlim)) {
-          return -1;
-        }
-        return 0;
+    case RLIMIT_NOFILE: {
+      absl::WriterMutexLock lock(&fd_table_lock_);
+      if (!fd_table_.SetFileDescriptorLimits(rlim)) {
+        return -1;
       }
+      return 0;
+    }
     default:
       errno = ENOSYS;
       return -1;

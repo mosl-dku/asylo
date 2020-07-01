@@ -14,8 +14,11 @@
 # limitations under the License.
 #
 
-load("//asylo/bazel:asylo.bzl", "cc_test", "embed_enclaves", "sim_enclave_test")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("//asylo/bazel:asylo.bzl", "cc_enclave_test", "cc_test", "embed_enclaves")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+load("//asylo/bazel:dlopen_enclave.bzl", "dlopen_enclave_test")
 
 licenses(["notice"])  # Apache v2.0
 
@@ -35,6 +38,9 @@ cc_library(
     hdrs = ["binary_search.h"],
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
+    deps = [
+        ":function_traits",
+    ],
 )
 
 cc_test(
@@ -54,7 +60,7 @@ cc_library(
     name = "cleanup",
     hdrs = ["cleanup.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = ["//asylo:implementation"],
+    visibility = ["//visibility:public"],
 )
 
 cc_test(
@@ -191,6 +197,45 @@ cc_test(
     ],
 )
 
+# A deleter struct that wraps a C function.
+cc_library(
+    name = "function_deleter",
+    hdrs = ["function_deleter.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+)
+
+cc_test(
+    name = "function_deleter_test",
+    srcs = ["function_deleter_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    enclave_test_name = "function_deleter_enclave_test",
+    deps = [
+        ":function_deleter",
+        "//asylo/test/util:test_main",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+# Type checking for anonymous functions.
+cc_library(
+    name = "function_traits",
+    hdrs = ["function_traits.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+)
+
+cc_test(
+    name = "function_traits_test",
+    srcs = ["function_traits_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":function_traits",
+        "//asylo/test/util:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
 # Minimal logging library implementation.
 cc_library(
     name = "logging",
@@ -205,7 +250,7 @@ cc_library(
     name = "mutex_guarded",
     hdrs = ["mutex_guarded.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = ["//asylo:implementation"],
+    visibility = ["//visibility:public"],
     deps = [
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/synchronization",
@@ -218,7 +263,6 @@ cc_test(
     name = "mutex_guarded_test",
     srcs = ["mutex_guarded_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ["noregression"],
     deps = [
         ":mutex_guarded",
         "//asylo/test/util:test_main",
@@ -240,7 +284,7 @@ cc_library(
     name = "status_macros",
     hdrs = ["status_macros.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = ["//asylo:implementation"],
+    visibility = ["//visibility:public"],
     deps = [
         "@com_google_absl//absl/base:core_headers",
     ],
@@ -257,6 +301,7 @@ cc_library(
         "status_error_space.cc",
         "status_error_space.h",
         "status_internal.h",
+        "statusor.cc",
     ],
     hdrs = [
         "posix_error_space.h",
@@ -267,14 +312,15 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":cleanup",
         ":status_cc_proto",
-        ":status_macros",
         "//asylo/platform/common:static_map",
         "//asylo/util:logging",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/meta:type_traits",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -310,6 +356,7 @@ cc_test(
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -371,6 +418,7 @@ cc_test(
         "//asylo/platform/common:static_map",
         "//asylo/test/util:test_main",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -382,6 +430,112 @@ cc_test(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":status",
+        "//asylo/test/util:test_main",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "proto_enum_util",
+    hdrs = ["proto_enum_util.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+proto_library(
+    name = "proto_enum_util_test_proto",
+    testonly = 1,
+    srcs = ["proto_enum_util_test.proto"],
+)
+
+cc_proto_library(
+    name = "proto_enum_util_test_cc_proto",
+    testonly = 1,
+    deps = ["proto_enum_util_test_proto"],
+)
+
+cc_test(
+    name = "proto_enum_util_test",
+    srcs = ["proto_enum_util_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    enclave_test_name = "proto_enum_util_enclave_test",
+    deps = [
+        ":proto_enum_util",
+        ":proto_enum_util_test_cc_proto",
+        "//asylo/test/util:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "proto_flag",
+    hdrs = ["proto_flag.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        "//asylo/util:logging",
+        "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "proto_flag_test",
+    srcs = ["proto_flag_test.cc"],
+    args = ["--my_test_flag=\"name: 'foo' value: 'bar'\""],
+    deps = [
+        ":proto_flag",
+        ":proto_parse_util",
+        "//asylo:enclave_cc_proto",
+        "//asylo/test/util:proto_matchers",
+        "//asylo/test/util:test_main",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "proto_parse_util",
+    hdrs = ["proto_parse_util.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":status",
+        "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+proto_library(
+    name = "proto_parse_util_test_proto",
+    testonly = 1,
+    srcs = ["proto_parse_util_test.proto"],
+)
+
+cc_proto_library(
+    name = "proto_parse_util_test_cc_proto",
+    testonly = 1,
+    deps = ["proto_parse_util_test_proto"],
+)
+
+cc_test(
+    name = "proto_parse_util_test",
+    srcs = ["proto_parse_util_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    enclave_test_name = "proto_parse_util_enclave_test",
+    deps = [
+        ":proto_parse_util",
+        ":proto_parse_util_test_cc_proto",
+        ":status",
+        "//asylo/test/util:proto_matchers",
+        "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "@com_google_googletest//:gtest",
     ],
@@ -460,7 +614,7 @@ cc_library(
     srcs = ["std_thread.h"],
     hdrs = ["thread.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = ["//asylo:implementation"],
+    visibility = ["//visibility:public"],
     deps =
         [
             "//asylo/util:logging",
@@ -471,7 +625,6 @@ cc_test(
     name = "thread_test",
     srcs = ["thread_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
-    enclave_test_name = "thread_enclave_test",
     deps = [
         ":mutex_guarded",
         ":thread",
@@ -483,7 +636,7 @@ cc_test(
     ],
 )
 
-sim_enclave_test(
+dlopen_enclave_test(
     name = "primitives_thread_test",
     srcs = ["thread_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -494,6 +647,198 @@ sim_enclave_test(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "hex_util",
+    srcs = ["hex_util.cc"],
+    hdrs = ["hex_util.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = ["@com_google_absl//absl/strings"],
+)
+
+cc_test(
+    name = "hex_util_test",
+    srcs = ["hex_util_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    enclave_test_name = "hex_util_enclave_test",
+    deps = [
+        ":hex_util",
+        "//asylo/test/util:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "http_fetcher",
+    hdrs = ["http_fetcher.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_library(
+    name = "http_fetcher_impl",
+    srcs = ["http_fetcher_impl.cc"],
+    hdrs = ["http_fetcher_impl.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":cleanup",
+        ":function_deleter",
+        ":http_fetcher",
+        ":status",
+        "@com_github_curl_curl//:curl",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_googlesource_code_re2//:re2",
+    ],
+)
+
+cc_test(
+    name = "http_fetcher_impl_test",
+    srcs = ["http_fetcher_impl_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":http_fetcher_impl",
+        ":status",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "@com_github_curl_curl//:curl",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "time_conversions",
+    srcs = [
+        "time_conversions_internal.cc",
+        "time_conversions_internal.h",
+    ],
+    hdrs = ["time_conversions.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":status",
+        "@com_github_grpc_grpc//:grpc",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_protobuf//:cc_wkt_protos",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "time_conversions_test",
+    srcs = [
+        "time_conversions_internal.h",
+        "time_conversions_test.cc",
+    ],
+    copts = ASYLO_DEFAULT_COPTS,
+    enclave_test_name = "time_conversions_enclave_test",
+    deps = [
+        ":binary_search",
+        ":status",
+        ":time_conversions",
+        "//asylo/test/util:proto_matchers",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:logging",
+        "@com_github_grpc_grpc//:grpc",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+        "@com_google_protobuf//:cc_wkt_protos",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "url_util",
+    srcs = ["url_util.cc"],
+    hdrs = ["url_util.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":error_codes",
+        ":function_deleter",
+        ":status",
+        "@com_google_absl//absl/strings",
+    ] + select({
+        # Prevent accidentally inserting libcurl into enclave depedencies.
+        "@com_google_asylo//asylo": [],
+        "//conditions:default": ["@com_github_curl_curl//:curl"],
+    }),
+)
+
+cc_test(
+    name = "url_util_test",
+    srcs = ["url_util_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":url_util",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "aligned_object_ptr",
+    hdrs = ["aligned_object_ptr.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+)
+
+cc_test(
+    name = "aligned_object_ptr_test",
+    srcs = ["aligned_object_ptr_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":aligned_object_ptr",
+        "//asylo/test/util:test_main",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "lock_guard",
+    hdrs = ["lock_guard.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":function_traits",
+        "@com_google_absl//absl/base:core_headers",
+    ],
+)
+
+cc_enclave_test(
+    name = "lock_guard_test",
+    srcs = ["lock_guard_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":lock_guard",
+        ":thread",
+        "//asylo/platform/core:trusted_mutex",
+        "//asylo/platform/core:trusted_spin_lock",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest",
     ],
 )

@@ -16,12 +16,14 @@
  *
  */
 
+#include "asylo/platform/posix/signal/signal_manager.h"
+
 #include <signal.h>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
-#include "asylo/platform/posix/signal/signal_manager.h"
+#include "asylo/util/lock_guard.h"
 
 namespace asylo {
 namespace {
@@ -38,38 +40,38 @@ sigset_t EmptySigSet() {
 
 thread_local sigset_t SignalManager::signal_mask_ = EmptySigSet();
 
+// Initialize the spin locks to be recursive so that signal handling does not
+// cause deadlock if a signal arrives while the thread is registering a signal.
+SignalManager::SignalManager() : signal_maps_lock_(/*is_recursive=*/true) {
+  signal_to_reset_.fill(ResetStatus::NO_RESET);
+}
+
 SignalManager *SignalManager::GetInstance() {
   static SignalManager *instance = new SignalManager();
   return instance;
 }
 
-Status SignalManager::HandleSignal(int signum, siginfo_t *info,
-                                   void *ucontext) {
-  std::unique_ptr<struct sigaction> act =
-      ::absl::make_unique<struct sigaction>(*GetSigAction(signum));
-  if (!act) {
-    return Status(
-        error::GoogleError::INTERNAL,
-        absl::StrCat("No handler has been registered for signal: ", signum));
+void SignalManager::HandleSignal(int signum, siginfo_t *info, void *ucontext) {
+  struct sigaction act;
+  // Return if the signal handler is already reset to default.
+  if (GetResetStatus(signum) == ResetStatus::RESET ||
+      !GetSigAction(signum, &act)) {
+    return;
   }
-  if (IsResetOnHandle(signum)) {
-    ClearSigAction(signum);
+  // If it's the first time a to-be-reset signal arrives, continue invoking the
+  // handler, but mark the signal as reset.
+  if (GetResetStatus(signum) == ResetStatus::TO_BE_RESET) {
+    SetResetStatus(signum, ResetStatus::RESET);
   }
-  Status status;
   sigset_t old_mask = GetSignalMask();
-  BlockSignals(act->sa_mask);
-  bool is_siginfo = act->sa_flags & SA_SIGINFO;
-  if (is_siginfo && act->sa_sigaction) {
-    act->sa_sigaction(signum, info, ucontext);
-  } else if (!is_siginfo && act->sa_handler) {
-    act->sa_handler(signum);
-  } else {
-    status = Status(
-        error::GoogleError::INTERNAL,
-        absl::StrCat("Handler registered for signal: ", signum, " is invalid"));
+  BlockSignals(act.sa_mask);
+  bool is_siginfo = act.sa_flags & SA_SIGINFO;
+  if (is_siginfo && act.sa_sigaction) {
+    act.sa_sigaction(signum, info, ucontext);
+  } else if (!is_siginfo && act.sa_handler) {
+    act.sa_handler(signum);
   }
   SetSignalMask(old_mask);
-  return status;
 }
 
 void SignalManager::SetSigAction(int signum, const struct sigaction &act) {
@@ -79,24 +81,25 @@ void SignalManager::SetSigAction(int signum, const struct sigaction &act) {
   sigset_t old_mask;
   sigprocmask(SIG_SETMASK, &mask, &old_mask);
   {
-    absl::MutexLock lock(&signal_to_sigaction_lock_);
+    LockGuard lock(&signal_maps_lock_);
     signal_to_sigaction_[signum] = absl::make_unique<struct sigaction>(act);
   }
   // Set the signal mask back to the original one to unblock the signals.
   sigprocmask(SIG_SETMASK, &old_mask, nullptr);
 }
 
-const struct sigaction *SignalManager::GetSigAction(int signum) const {
-  absl::MutexLock lock(&signal_to_sigaction_lock_);
+bool SignalManager::GetSigAction(int signum, struct sigaction *act) {
+  LockGuard lock(&signal_maps_lock_);
   auto sigaction_iterator = signal_to_sigaction_.find(signum);
   if (sigaction_iterator == signal_to_sigaction_.end()) {
-    return nullptr;
+    return false;
   }
-  return sigaction_iterator->second.get();
+  *act = *sigaction_iterator->second;
+  return true;
 }
 
 void SignalManager::ClearSigAction(int signum) {
-  absl::MutexLock lock(&signal_to_sigaction_lock_);
+  LockGuard lock(&signal_maps_lock_);
   signal_to_sigaction_.erase(signum);
 }
 
@@ -131,15 +134,21 @@ sigset_t SignalManager::GetUnblockedSet(const sigset_t &set) {
   return signals_to_unblock;
 }
 
-void SignalManager::SetResetOnHandle(int signum) {
-  absl::MutexLock lock(&signal_to_reset_lock_);
-  signal_to_reset_.insert(signum);
+void SignalManager::SetResetStatus(int signum,
+                                   SignalManager::ResetStatus status) {
+  if (signum < 0 || signum >= kNumberSignals) {
+    return;
+  }
+  LockGuard lock(&signal_maps_lock_);
+  signal_to_reset_[signum] = status;
 }
 
-bool SignalManager::IsResetOnHandle(int signum) {
-  absl::MutexLock lock(&signal_to_reset_lock_);
-  return signal_to_reset_.find(signum) != signal_to_reset_.end();
+SignalManager::ResetStatus SignalManager::GetResetStatus(int signum) {
+  if (signum < 0 || signum >= kNumberSignals) {
+    return ResetStatus::NOT_AVAILABLE;
+  }
+  LockGuard lock(&signal_maps_lock_);
+  return signal_to_reset_[signum];
 }
 
 }  // namespace asylo
-

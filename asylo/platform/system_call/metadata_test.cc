@@ -16,6 +16,9 @@
  *
  */
 
+#include "asylo/platform/system_call/metadata.h"
+
+#include <sys/poll.h>
 #include <sys/syscall.h>
 
 #include <string>
@@ -25,7 +28,6 @@
 #include <gtest/gtest.h>
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
-#include "asylo/platform/system_call/metadata.h"
 
 namespace asylo {
 namespace system_call {
@@ -168,6 +170,21 @@ TEST(MetaDataTest, InvalidSystemCallParameter) {
   EXPECT_FALSE(SystemCallDescriptor{SYS_dup}.parameter(1).is_valid());
 }
 
+TEST(MetaDataTest, ParameterElementSizeTest) {
+  SystemCallDescriptor poll_des{SYS_poll};
+  ParameterDescriptor bounding_param =
+      poll_des.parameter(0).bounding_parameter();
+  EXPECT_TRUE(poll_des.is_valid());
+  EXPECT_TRUE(poll_des.parameter(0).is_bounded());
+  EXPECT_TRUE(poll_des.parameter(0).is_pointer());
+  EXPECT_THAT(poll_des.parameter(0).element_size(), Eq(sizeof(struct pollfd)));
+  EXPECT_THAT(poll_des.parameter(0).size(),
+              Eq(1));  // Bounded to parameter at index 1 (nfds).
+  EXPECT_TRUE(bounding_param.is_valid());
+  EXPECT_THAT(bounding_param.index(), Eq(1));
+  EXPECT_THAT(bounding_param.is_const(), Eq(true));
+}
+
 TEST(MetaDataTest, Summarize) {
   // int dup(int oldfd);
   EXPECT_THAT(Summarize(SYS_dup), StrEq("dup/1(fildes: u32)"));
@@ -212,14 +229,15 @@ TEST(MetaDataTest, Summarize) {
   // int poll(struct pollfd *fds, nfds_t nfds, int timeout);
   EXPECT_THAT(
       Summarize(SYS_poll),
-      StrEq("poll/3(ufds: in/out fixed[8], nfds: u32, timeout_msecs: s32)"));
+      StrEq("poll/3(fds: in/out bounded[nfds], nfds: u64, timeout: s32)"));
 
   // int select(int nfds, fd_set *readfds, fd_set *writefds,
   //            fd_set *exceptfds, struct timeval *timeout);
   EXPECT_THAT(
       Summarize(SYS_select),
-      StrEq("select/5(n: s32, inp: in/out fixed[128], outp: in/out fixed[128], "
-            "exp: in/out fixed[128], tvp: in/out fixed[16])"));
+      StrEq(
+          "select/5(nfds: s32, readfds: in/out fixed[128], writefds: in/out "
+          "fixed[128], exceptfds: in/out fixed[128], timeout: in fixed[16])"));
 
   // int access(const char *pathname, int mode);
   EXPECT_THAT(Summarize(SYS_access),
@@ -231,9 +249,6 @@ TEST(MetaDataTest, Summarize) {
 
   // int close(int fd);
   EXPECT_THAT(Summarize(SYS_close), StrEq("close/1(fd: u32)"));
-
-  // int pipe(int pipefd[2]);
-  EXPECT_THAT(Summarize(SYS_pipe), StrEq("pipe/1(fildes: out fixed[8])"));
 
   // int pipe2(int pipefd[2], int flags);
   EXPECT_THAT(Summarize(SYS_pipe2),
@@ -254,6 +269,10 @@ TEST(MetaDataTest, Summarize) {
   // int fstat(int fd, struct stat *statbuf);
   EXPECT_THAT(Summarize(SYS_fstat),
               StrEq("fstat/2(fd: u32, statbuf: out fixed[144])"));
+
+  // int fstatfs(int fd, struct statfs *statbuf);
+  EXPECT_THAT(Summarize(SYS_fstatfs),
+              StrEq("fstatfs/2(fd: s32, statbuf: out fixed[120])"));
 }
 
 }  // namespace

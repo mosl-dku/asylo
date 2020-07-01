@@ -187,10 +187,16 @@ void LogMessage::Init(const char *file, int line, LogSeverity severity) {
   clock_gettime(CLOCK_REALTIME, &time_stamp);
 
   constexpr int kTimeMessageSize = 22;
-  char buffer[kTimeMessageSize];
-  strftime(buffer, kTimeMessageSize, "%Y-%m-%d %H:%M:%S  ",
-           localtime(&time_stamp.tv_sec));
-  stream() << buffer;
+  struct tm datetime;
+  memset(&datetime, 0, sizeof(datetime));
+  if (localtime_r(&time_stamp.tv_sec, &datetime)) {
+    char buffer[kTimeMessageSize];
+    strftime(buffer, kTimeMessageSize, "%Y-%m-%d %H:%M:%S  ", &datetime);
+    stream() << buffer;
+  } else {
+    // localtime_r returns error. Attach the errno message.
+    stream() << "Failed to get time:" << strerror(errno) << "  ";
+  }
   stream() << LogSeverityNames[severity_] << "  " << filename << " : " << line
            << " : ";
 }
@@ -198,6 +204,16 @@ void LogMessage::Init(const char *file, int line, LogSeverity severity) {
 LogMessage::~LogMessage() {
   std::string message_text = stream_.str();
   SendToLog(message_text);
+}
+
+LogMessageFatal::~LogMessageFatal() {
+  std::string message_text = stream_.str();
+  SendToLog(message_text);
+  // if FATAL occurs, abort enclave.
+  if (severity_ == FATAL) {
+    abort();
+  }
+  _exit(1);
 }
 
 void LogMessage::SendToLog(const std::string &message_text) {
@@ -222,14 +238,6 @@ void LogMessage::SendToLog(const std::string &message_text) {
   }
   printf("%s\n", message_text.c_str());
   fflush(stdout);
-
-  // if FATAL occurs, abort enclave.
-  if (severity_ == FATAL) {
-    abort();
-  }
-  if (severity_ == QFATAL) {
-    _exit(1);
-  }
 }
 
 CheckOpMessageBuilder::CheckOpMessageBuilder(const char *exprtext)

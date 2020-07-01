@@ -14,13 +14,15 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "//asylo/bazel:asylo.bzl",
     cc_test = "cc_test_and_cc_enclave_test",
 )
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 # Asylo Crypto library
 
@@ -64,6 +66,28 @@ cc_proto_library(
     deps = [":certificate_proto"],
 )
 
+proto_library(
+    name = "fake_certificate_proto",
+    srcs = ["fake_certificate.proto"],
+)
+
+cc_proto_library(
+    name = "fake_certificate_cc_proto",
+    deps = [":fake_certificate_proto"],
+)
+
+proto_library(
+    name = "sha256_hash_proto",
+    srcs = ["sha256_hash.proto"],
+    visibility = ["//visibility:public"],
+)
+
+cc_proto_library(
+    name = "sha256_hash_cc_proto",
+    visibility = ["//visibility:public"],
+    deps = ["sha256_hash_proto"],
+)
+
 # A generic cryptor wrapping an AEAD key and a NonceGeneratorInterface.
 cc_library(
     name = "aead_cryptor",
@@ -79,6 +103,7 @@ cc_library(
         "//asylo/crypto/util:byte_container_view",
         "//asylo/util:status",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
     ],
 )
@@ -87,6 +112,7 @@ cc_library(
 cc_test(
     name = "aead_cryptor_test",
     srcs = ["aead_cryptor_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":aead_cryptor",
         ":aead_test_vector",
@@ -150,6 +176,121 @@ cc_test(
     ],
 )
 
+# Library to use with ASN.1 data structures.
+cc_library(
+    name = "asn1",
+    srcs = ["asn1.cc"],
+    hdrs = ["asn1.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":bignum_util",
+        "//asylo/crypto/util:bssl_util",
+        "//asylo/crypto/util:byte_container_view",
+        "//asylo/util:logging",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+# Test for ASN.1 library.
+cc_test(
+    name = "asn1_test",
+    srcs = ["asn1_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":asn1",
+        ":bignum_util",
+        "//asylo/crypto/util:bssl_util",
+        "//asylo/crypto/util:byte_container_view",
+        "//asylo/test/util:integral_type_test_data",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/hash:hash_testing",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+# Library for specifying ASN.1 structures.
+cc_library(
+    name = "asn1_schema",
+    srcs = ["asn1_schema.cc"],
+    hdrs = ["asn1_schema.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":asn1",
+        "//asylo/util:status",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+# Tests for the ASN.1 specification library.
+cc_test(
+    name = "asn1_schema_test",
+    srcs = ["asn1_schema_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":asn1",
+        ":asn1_schema",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/memory",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+# Utility library for OpenSSL BIGNUMs.
+cc_library(
+    name = "bignum_util",
+    srcs = ["bignum_util.cc"],
+    hdrs = ["bignum_util.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        "//asylo/crypto/util:bssl_util",
+        "//asylo/crypto/util:byte_container_view",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+# Tests for BIGNUM utilities library.
+cc_test(
+    name = "bignum_util_test",
+    srcs = ["bignum_util_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":bignum_util",
+        "//asylo/crypto/util:bssl_util",
+        "//asylo/test/util:integral_type_test_data",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
 # Library to use with certificates.
 cc_library(
     name = "certificate_util",
@@ -159,7 +300,15 @@ cc_library(
     visibility = ["//asylo:implementation"],
     deps = [
         ":certificate_cc_proto",
+        ":certificate_interface",
+        ":x509_certificate",
+        "//asylo/identity/attestation/sgx/internal:attestation_key_certificate_impl",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -170,92 +319,87 @@ cc_test(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":certificate_cc_proto",
+        ":certificate_interface",
         ":certificate_util",
+        ":fake_certificate",
+        ":fake_certificate_cc_proto",
+        "//asylo/test/util:proto_matchers",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
-        "//asylo/util:status",
-        "@com_google_googletest//:gtest",
-    ],
-)
-
-# Library of utilities for certificate chains.
-cc_library(
-    name = "certificate_chain_util",
-    srcs = ["certificate_chain_util.cc"],
-    hdrs = ["certificate_chain_util.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    visibility = ["//asylo:implementation"],
-    deps = [
-        ":certificate_cc_proto",
-        ":certificate_util_interface",
-        "//asylo/util:status",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
-# Test for certificate chain util.
-cc_test(
-    name = "certificate_chain_util_test",
-    srcs = ["certificate_chain_util_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":certificate_cc_proto",
-        ":certificate_chain_util",
-        ":certificate_util_interface",
-        "//asylo/crypto/util:byte_container_view",
-        "//asylo/test/util:status_matchers",
-        "//asylo/test/util:test_main",
-        "//asylo/util:status",
+        "//asylo/util:proto_parse_util",
         "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
 # Interface for performing operations on certificates.
 cc_library(
-    name = "certificate_util_interface",
-    hdrs = ["certificate_util_interface.h"],
+    name = "certificate_interface",
+    hdrs = ["certificate_interface.h"],
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
         ":certificate_cc_proto",
-        "//asylo/crypto/util:byte_container_view",
         "//asylo/util:status",
+        "@com_google_absl//absl/types:optional",
     ],
 )
 
-# X.509 certificate util.
+# X.509 certificate wrapper.
 cc_library(
-    name = "x509_certificate_util",
-    srcs = ["x509_certificate_util.cc"],
-    hdrs = ["x509_certificate_util.h"],
+    name = "x509_certificate",
+    srcs = ["x509_certificate.cc"],
+    hdrs = ["x509_certificate.h"],
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
+        ":asn1",
         ":certificate_cc_proto",
-        ":certificate_util_interface",
+        ":certificate_interface",
+        ":signing_key",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
+        "//asylo/util:logging",
+        "//asylo/util:proto_enum_util",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+# Tests for X.509 certificate wrapper.
+cc_test(
+    name = "x509_certificate_test",
+    srcs = ["x509_certificate_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":asn1",
+        ":bignum_util",
+        ":certificate_cc_proto",
+        ":certificate_interface",
+        ":ecdsa_p256_sha256_signing_key",
+        ":fake_certificate",
+        ":x509_certificate",
+        "//asylo/crypto/util:byte_container_util",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:string_matchers",
+        "//asylo/test/util:test_main",
         "//asylo/util:status",
         "@boringssl//:crypto",
         "@com_google_absl//absl/strings",
-    ],
-)
-
-# Tests for X.509 certificate util.
-cc_test(
-    name = "x509_certificate_util_test",
-    srcs = ["x509_certificate_util_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":certificate_cc_proto",
-        ":x509_certificate_util",
-        "//asylo/test/util:status_matchers",
-        "//asylo/test/util:test_main",
-        "//asylo/util:status",
-        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -295,6 +439,7 @@ cc_library(
         "//asylo/crypto/util:bssl_util",
         "//asylo/util:status",
         "@boringssl//:crypto",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
     ],
@@ -358,6 +503,7 @@ cc_library(
         "nonce_generator.h",
     ],
     copts = ASYLO_DEFAULT_COPTS,
+    deprecation = "Use //asylo/crypto:aead_cryptor instead.",
     visibility = ["//visibility:public"],
     deps = [
         "//asylo/crypto/util:bssl_util",
@@ -366,6 +512,7 @@ cc_library(
         "//asylo/util:logging",
         "//asylo/util:status",
         "@boringssl//:crypto",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -389,14 +536,20 @@ cc_test(
 
 cc_library(
     name = "signing_key",
+    srcs = ["signing_key.cc"],
     hdrs = ["signing_key.h"],
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
         ":algorithms_cc_proto",
+        ":keys_cc_proto",
+        "//asylo/crypto/util:byte_container_util",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/util:cleansing_types",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -407,13 +560,20 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
+        ":algorithms_cc_proto",
+        ":bignum_util",
+        ":keys_cc_proto",
         ":sha256_hash",
         ":signing_key",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
+        "//asylo/crypto/util:bytes",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
         "@boringssl//:crypto",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -423,30 +583,127 @@ cc_test(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":ecdsa_p256_sha256_signing_key",
+        ":fake_signing_key",
+        ":keys_cc_proto",
         ":signing_key",
         "//asylo/crypto/util:byte_container_util",
+        "//asylo/crypto/util:byte_container_view",
+        "//asylo/test/util:proto_matchers",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:string_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:cleansing_types",
+        "//asylo/util:logging",
+        "//asylo/util:status_macros",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "fake_certificate",
+    testonly = 1,
+    srcs = ["fake_certificate.cc"],
+    hdrs = ["fake_certificate.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":certificate_cc_proto",
+        ":certificate_interface",
+        ":fake_certificate_cc_proto",
+        "//asylo/util:status",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_test(
+    name = "fake_certificate_test",
+    srcs = ["fake_certificate_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":certificate_cc_proto",
+        ":certificate_interface",
+        ":fake_certificate",
+        ":fake_certificate_cc_proto",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "fake_signing_key",
+    testonly = 1,
+    srcs = ["fake_signing_key.cc"],
+    hdrs = ["fake_signing_key.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//asylo:implementation"],
+    deps = [
+        ":algorithms_cc_proto",
+        ":keys_cc_proto",
+        ":signing_key",
+        "//asylo/crypto/util:byte_container_util",
+        "//asylo/crypto/util:byte_container_view",
+        "//asylo/util:cleansing_types",
+        "//asylo/util:status",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/memory",
+    ],
+)
+
+cc_test(
+    name = "fake_signing_key_test",
+    srcs = ["fake_signing_key_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":fake_signing_key",
+        ":signing_key",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "//asylo/util:cleansing_types",
-        "//asylo/util:logging",
-        "@boringssl//:crypto",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/strings",
+        "//asylo/util:status",
         "@com_google_googletest//:gtest",
     ],
 )
 
 cc_library(
     name = "asymmetric_encryption_key",
+    srcs = ["asymmetric_encryption_key.cc"],
     hdrs = ["asymmetric_encryption_key.h"],
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
         ":algorithms_cc_proto",
+        ":keys_cc_proto",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/util:cleansing_types",
         "//asylo/util:status",
+    ],
+)
+
+cc_test(
+    name = "asymmetric_encryption_key_test",
+    srcs = ["asymmetric_encryption_key_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":algorithms_cc_proto",
+        ":asymmetric_encryption_key",
+        ":keys_cc_proto",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:cleansing_types",
+        "//asylo/util:error_codes",
+        "//asylo/util:status",
+        "@com_google_absl//absl/memory",
+        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -457,32 +714,69 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
-        "asymmetric_encryption_key",
         ":algorithms_cc_proto",
+        ":asymmetric_encryption_key",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_util",
         "//asylo/crypto/util:byte_container_view",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
         "@boringssl//:crypto",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
     ],
 )
 
 cc_test(
     name = "rsa_oaep_encryption_key_test",
+    size = "small",
     srcs = ["rsa_oaep_encryption_key_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
+    transitive_features = ["lvi_no_auto_mitigation"],  # disable LVI mitigation to shorten test time
     deps = [
-        "asymmetric_encryption_key",
-        "rsa_oaep_encryption_key",
         ":algorithms_cc_proto",
+        ":asymmetric_encryption_key",
+        ":keys_cc_proto",
+        ":rsa_oaep_encryption_key",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_util",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "//asylo/util:cleansing_types",
+        "//asylo/util:proto_parse_util",
+        "//asylo/util:status",
+        "//asylo/util:status_macros",
         "@boringssl//:crypto",
         "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "sha256_hash_util",
+    srcs = ["sha256_hash_util.cc"],
+    hdrs = ["sha256_hash_util.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":sha256_hash_cc_proto",
+        "//asylo/crypto/util:bytes",
+        "//asylo/crypto/util:trivial_object_util",
+        "//asylo/util:status",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "sha256_hash_util_test",
+    srcs = ["sha256_hash_util_test.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":sha256_hash_cc_proto",
+        ":sha256_hash_util",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
         "@com_google_googletest//:gtest",
     ],
 )

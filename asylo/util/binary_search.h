@@ -24,18 +24,22 @@
 #include <limits>
 #include <type_traits>
 
+#include "asylo/util/function_traits.h"
+
 namespace asylo {
 
 // Returns the largest size_t for which f returns true, or 0 if f returns
 // false for all numbers. Assumes f returns true for all numbers from 0 up
 // to an unknown constant k, and false above that. Finds an upper bound in such
 // a way that f will never be called on an argument larger than 2*k.
-template <class Func>
-size_t BinarySearch(Func f) {
-  // Force f to have the correct type
-  static_assert(std::is_convertible<Func, std::function<bool(size_t)>>::value,
-                "Cannot instantiate BinarySearch template parameter with "
-                "improperly typed callable");
+template <class FuncT>
+size_t BinarySearch(FuncT f) {
+  // Force f to have the correct type.
+  static_assert(FunctionTraits<FuncT>::template CheckReturnType<bool>::value,
+                "Expected a function which returns a bool");
+  static_assert(
+      FunctionTraits<FuncT>::template CheckArgumentTypes<size_t>::value,
+      "Expected a function which returns takes a size_t");
 
   if (!f(0) || !f(1)) {
     return 0;
@@ -49,7 +53,7 @@ size_t BinarySearch(Func f) {
   // This avoids calling f on max value for size_t
   // (which could be extremely expensive in some cases).
   for (int i = 1; i < max_bits && f(upper_bound); i++) {
-    lower_bound = 1 << i;
+    lower_bound = size_t{1} << i;
     if (i != max_bits - 1) {
       upper_bound = lower_bound << 1;
     } else {

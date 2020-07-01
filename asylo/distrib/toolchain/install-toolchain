@@ -23,9 +23,9 @@ set -e
 readonly install_default=/opt/asylo/toolchains/default
 
 # Dependency source files to use when fetching from online.
-readonly gcc_tag=gcc-7_4_0-release
-readonly gcc_default="gcc-${gcc_tag}.tar.gz"  # github renames the archive.
-readonly gcc_default_sha="e1b1a60ca5c93e9838e6c0252d0aa977b76088114e68bc2753ff59c85328b308"
+readonly gcc_tag=releases/gcc-7.4.0
+readonly gcc_default="gcc-${gcc_tag//\//-}.tar.gz"  # github renames the archive.
+readonly gcc_default_sha="9d4f845f88a4eab077e777725fafd768239ede9baed6e452909e48d7abeb97c1"
 readonly binutils_default=binutils-2.24.tar.gz
 readonly binutils_default_sha="4930b2886309112c00a279483eaef2f0f8e1b1b62010e0239c16b22af7c346d4"
 readonly newlib_default=newlib-2.5.0.20170922.tar.gz
@@ -320,6 +320,8 @@ if [[ -z "${binutils}" ]]; then
   if [[ -f "${binutils_default}" ]]; then
     verify_sha "${binutils_default}" "${binutils_default_sha}"
     set_directory binutils "${binutils_default}"
+    patch -u "${srcs_root}/${binutils}/gas/config/tc-i386.c" -i "${toolchain_root}/binutils-lvi.patch"
+    patch -u "${srcs_root}/${binutils}/binutils/objcopy.c" -i "${toolchain_root}/objcopy-alignment.patch"
   else
     echo "Missing ${binutils_default%.tar.gz} dependency."
     exit 1
@@ -333,6 +335,9 @@ if [[ -z "${newlib}" ]]; then
   fi
   if [[ -f "${newlib_default}" ]]; then
     verify_sha "${newlib_default}" "${newlib_default_sha}"
+    # Remove the existing directory if it exists in order for the patch to apply
+    # correctly.
+    rm -rf "${newlib_default%.tar.gz}"
     set_directory newlib "${newlib_default}"
     patch -d "${newlib_default%.tar.gz}" -p0 < \
         "${toolchain_root}/${newlib_default%.tar.gz}.patch"
@@ -473,10 +478,14 @@ export CXXFLAGS_FOR_TARGET="${CXXFLAGS}"
    sed -i 's^extra_opt_files=.*^& $(srcdir)/config/gnu-user.opt^' gcc/Makefile &&
    # GCC hard-codes what math functions newlib provides, but has a few missing.
    make configure-target-libstdc++-v3 &&
-   echo "#define HAVE_HYPOTF" >> x86_64-elf/libstdc++-v3/config.h &&
-   echo "#define HAVE_HYPOTL" >> x86_64-elf/libstdc++-v3/config.h &&
-   echo "#define HAVE_SQRTL" >> x86_64-elf/libstdc++-v3/config.h &&
-   echo "#define _GLIBCXX_USE_RANDOM_TR1" >> x86_64-elf/libstdc++-v3/config.h &&
+   echo "#define HAVE_HYPOTF 1" >> x86_64-elf/libstdc++-v3/config.h &&
+   echo "#define HAVE_HYPOTL 1" >> x86_64-elf/libstdc++-v3/config.h &&
+   echo "#define HAVE_SQRTL 1" >> x86_64-elf/libstdc++-v3/config.h &&
+   # GCC doesn't do GLIBCXX_CROSSCONFIG if specifying --with-newlib, so we
+   # need to manually tell libstdc++ that we have /dev/random and thread-local
+   # storage available.
+   echo "#define _GLIBCXX_USE_RANDOM_TR1 1" >> x86_64-elf/libstdc++-v3/config.h &&
+   echo "#define HAVE_TLS 1" >> x86_64-elf/libstdc++-v3/config.h &&
    # Use an extended version of libc++.
    echo "#define _GLIBCXX_USE_C99 1" >> x86_64-elf/libstdc++-v3/config.h &&
    make -j"${JOBS}" && make install &&

@@ -238,7 +238,11 @@ TAB_SIZE               = 4
 # "Side Effects:". You can put \n's in the value part of an alias to insert
 # newlines.
 
-ALIASES                =
+ALIASES                = \
+  trusted_primitives=asylo/platform/primitives/trusted_primitives.h \
+  untrusted_primitives=asylo/platform/primitives/untrusted_primitives.h \
+  primitives=asylo/platform/primitives/primitives.h \
+  primitive_status=asylo/platform/primitives/primitive_status.h
 
 # This tag can be used to specify a number of word-keyword mappings (TCL only).
 # A mapping has the form "name=value". For example adding "class=itcl::class"
@@ -791,26 +795,43 @@ WARN_LOGFILE           =
 # Note: If this tag is empty the current directory is searched.
 
 INPUT                  = \
+asylo/binding/java/src/main/java/com/asylo/client \
 asylo/crypto/aead_cryptor.h \
 asylo/crypto/aes_gcm_siv.h \
 asylo/crypto/nonce_generator.h \
+asylo/crypto/sha256_hash_util.h \
 asylo/grpc/auth/enclave_auth_context.h \
 asylo/grpc/auth/enclave_channel_credentials.h \
 asylo/grpc/auth/enclave_credentials_options.h \
 asylo/grpc/auth/enclave_server_credentials.h \
 asylo/grpc/auth/null_credentials_options.h \
+asylo/grpc/auth/peer_sgx_age_remote_credentials_options.h \
+asylo/grpc/auth/sgx_age_remote_credentials_options.h \
 asylo/grpc/auth/sgx_local_credentials_options.h \
+asylo/identity/descriptions.h \
 asylo/identity/enclave_assertion_authority.h \
-asylo/identity/enclave_assertion_generator.h \
-asylo/identity/enclave_assertion_verifier.h \
+asylo/identity/enclave_assertion_authority_configs.h \
 asylo/identity/identity_acl_evaluator.h \
 asylo/identity/identity_expectation_matcher.h \
-asylo/identity/null_identity/null_assertion_generator.h \
-asylo/identity/null_identity/null_assertion_verifier.h \
-asylo/identity/secret_sealer.h \
-asylo/identity/sgx/sgx_local_assertion_generator.h \
-asylo/identity/sgx/sgx_local_assertion_verifier.h \
-asylo/identity/sgx/sgx_local_secret_sealer.h \
+asylo/identity/named_identity_expectation_matcher.h \
+asylo/identity/attestation/enclave_assertion_generator.h \
+asylo/identity/attestation/enclave_assertion_verifier.h \
+asylo/identity/attestation/null/null_assertion_generator.h \
+asylo/identity/attestation/null/null_assertion_verifier.h \
+asylo/identity/attestation/null/null_identity_util.h \
+asylo/identity/attestation/sgx/sgx_age_remote_assertion_generator.h \
+asylo/identity/attestation/sgx/sgx_age_remote_assertion_verifier.h \
+asylo/identity/attestation/sgx/sgx_intel_ecdsa_qe_remote_assertion_generator.h \
+asylo/identity/attestation/sgx/sgx_intel_ecdsa_qe_remote_assertion_verifier.h \
+asylo/identity/attestation/sgx/sgx_local_assertion_generator.h \
+asylo/identity/attestation/sgx/sgx_local_assertion_verifier.h \
+asylo/identity/platform/sgx/architecture_bits.h \
+asylo/identity/platform/sgx/attributes_util.h \
+asylo/identity/platform/sgx/miscselect_util.h \
+asylo/identity/platform/sgx/sgx_identity_expectation_matcher.h \
+asylo/identity/platform/sgx/sgx_identity_util.h \
+asylo/identity/sealing/secret_sealer.h \
+asylo/identity/sealing/sgx/sgx_local_secret_sealer.h \
 asylo/platform/core/enclave_client.h \
 asylo/platform/core/enclave_config_util.h \
 asylo/platform/core/enclave_manager.h \
@@ -818,10 +839,17 @@ asylo/platform/core/shared_name.h \
 asylo/platform/core/shared_name_kind.h \
 asylo/platform/core/shared_resource_manager.h \
 asylo/platform/core/trusted_application.h \
+asylo/platform/primitives/extent.h \
+asylo/platform/primitives/primitive_status.h \
+asylo/platform/primitives/primitives.h \
+asylo/platform/primitives/trusted_primitives.h \
+asylo/platform/primitives/untrusted_primitives.h \
 asylo/test/util/exec_tester.h \
+asylo/util/cleansing_types.h \
 asylo/util/error_space.h \
-asylo/util/posix_error_space.h \
 asylo/util/logging.h \
+asylo/util/posix_error_space.h \
+asylo/util/proto_flag.h \
 asylo/util/status.h \
 asylo/util/statusor.h \
 asylo/util/status_macros.h \
@@ -1192,7 +1220,7 @@ HTML_FILE_EXTENSION    = .html
 # of the possible markers and block names see the documentation.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_HEADER            = doxygen_header.html
+HTML_HEADER            = asylo/docs/assets/doxygen_header.html
 
 # The HTML_FOOTER tag can be used to specify a user-defined HTML footer for each
 # generated HTML page. If the tag is left blank doxygen will generate a standard
@@ -1202,7 +1230,7 @@ HTML_HEADER            = doxygen_header.html
 # that doxygen normally uses.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_FOOTER            = asylo/docs/assets/footer.html
+HTML_FOOTER            = asylo/docs/assets/doxygen_footer.html
 
 # The HTML_STYLESHEET tag can be used to specify a user-defined cascading style
 # sheet that is used by each HTML page. It can be used to fine-tune the look of

@@ -39,6 +39,11 @@ class IOContextNative : public IOManager::IOContext {
   int FCntl(int cmd, int64_t arg) override;
   int FSync() override;
   int FStat(struct stat *stat_buffer) override;
+  int FStatFs(struct statfs *statfs_buffer) override;
+  ssize_t FGetXattr(const char *name, void *value, size_t size) override;
+  int FSetXattr(const char *name, const void *value, size_t size,
+                int flags) override;
+  ssize_t FListXattr(char *list, size_t size) override;
   int Isatty() override;
   int FLock(int operation) override;
   int Close() override;
@@ -68,10 +73,7 @@ class IOContextNative : public IOManager::IOContext {
  private:
   // Host file descriptor implementing this stream.
   int host_fd_;
-  bool CreateUntrustedBuffer(const struct iovec *iov,
-      int iovcnt, char **buf, int *size);
-  bool SerializeIov(const struct iovec *iov, int iovcnt,
-      char **buf, int *size);
+  void FillIov(const char *buf, int size, const struct iovec *iov, int iovcnt);
 };
 
 // VirtualPathHandler implementation handling paths to be forwarded to the host.
@@ -87,7 +89,18 @@ class NativePathHandler : public io::IOManager::VirtualPathHandler {
   int SymLink(const char *path1, const char *path2) override;
   int Truncate(const char *path, off_t length) override;
   int Stat(const char *pathname, struct stat *stat_buffer) override;
+  int StatFs(const char *pathname, struct statfs *statfs_buffer) override;
   int LStat(const char *pathname, struct stat *stat_buffer) override;
+  ssize_t GetXattr(const char *path, const char *name, void *value,
+                   size_t size) override;
+  ssize_t LGetXattr(const char *path, const char *name, void *value,
+                    size_t size) override;
+  int SetXattr(const char *path, const char *name, const void *value,
+               size_t size, int flags) override;
+  int LSetXattr(const char *path, const char *name, const void *value,
+                size_t size, int flags) override;
+  ssize_t ListXattr(const char *path, char *list, size_t size) override;
+  ssize_t LListXattr(const char *path, char *list, size_t size) override;
   int Mkdir(const char *path, mode_t mode) override;
   int RmDir(const char *pathname) override;
   int Rename(const char *oldpath, const char *newpath) override;
@@ -95,6 +108,8 @@ class NativePathHandler : public io::IOManager::VirtualPathHandler {
   int ChMod(const char *pathname, mode_t mode) override;
   int Utime(const char *filename, const struct utimbuf *times) override;
   int Utimes(const char *filename, const struct timeval times[2]) override;
+  int InotifyAddWatch(std::shared_ptr<IOManager::IOContext> context,
+                      const char *pathname, uint32_t mask) override;
 };
 
 }  // namespace io

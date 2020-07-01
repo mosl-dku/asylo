@@ -34,6 +34,7 @@
 #include "asylo/crypto/util/byte_container_view.h"
 #include "asylo/util/logging.h"
 #include "asylo/grpc/auth/core/ekep_error_space.h"
+#include "asylo/util/proto_enum_util.h"
 #include "asylo/util/status.h"
 
 namespace asylo {
@@ -65,7 +66,7 @@ Status Hmac(const HandshakeCipher &ciphersuite, ByteContainerView key,
     default:
       return Status(
           Abort::BAD_HANDSHAKE_CIPHER,
-          "Ciphersuite not supported: " + HandshakeCipher_Name(ciphersuite));
+          "Ciphersuite not supported: " + ProtoEnumValueName(ciphersuite));
   }
 
   unsigned int mac_size = mac->size();
@@ -118,7 +119,7 @@ Status DeriveSecrets(const HandshakeCipher &ciphersuite,
     default:
       return Status(
           Abort::BAD_HANDSHAKE_CIPHER,
-          "Ciphersuite not supported: " + HandshakeCipher_Name(ciphersuite));
+          "Ciphersuite not supported: " + ProtoEnumValueName(ciphersuite));
   }
 
   // Derive the master and authenticator secrets using HKDF.
@@ -158,14 +159,14 @@ Status DeriveRecordProtocolKey(const HandshakeCipher &ciphersuite,
     default:
       return Status(
           Abort::BAD_HANDSHAKE_CIPHER,
-          "Ciphersuite not supported: " + HandshakeCipher_Name(ciphersuite));
+          "Ciphersuite not supported: " + ProtoEnumValueName(ciphersuite));
   }
 
   // Resize the output vector to an appropriate size for the selected record
   // protocol.
   switch (record_protocol) {
-    case SEAL_AES128_GCM:
-      record_protocol_key->resize(kSealAes128GcmKeySize);
+    case ALTSRP_AES128_GCM:
+      record_protocol_key->resize(kAltsRecordProtocolAes128GcmKeySize);
       // Randomize the key bytes just in case the key is mistakenly used even
       // when the key derivation fails. The byte-sequence in uninitialized
       // memory could be predictable and, as a result, an attacker may be able
@@ -178,7 +179,7 @@ Status DeriveRecordProtocolKey(const HandshakeCipher &ciphersuite,
     default:
       return Status(Abort::BAD_RECORD_PROTOCOL,
                     "Record protocol not supported " +
-                        RecordProtocol_Name(record_protocol));
+                        ProtoEnumValueName(record_protocol));
   }
 
   std::string salt(kEkepHkdfSaltRecordProtocol);

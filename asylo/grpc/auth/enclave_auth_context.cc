@@ -21,14 +21,16 @@
 #include <google/protobuf/io/coded_stream.h>
 #include "absl/strings/str_cat.h"
 #include "asylo/grpc/auth/core/enclave_grpc_security_constants.h"
+#include "asylo/identity/identity_acl_evaluator.h"
 #include "asylo/util/status.h"
 #include "src/core/lib/security/context/security_context.h"
+#include "src/core/tsi/transport_security_interface.h"
 
 namespace asylo {
 
 StatusOr<EnclaveAuthContext> EnclaveAuthContext::CreateFromServerContext(
     const ::grpc::ServerContext &server_context) {
-  return CreateFromAuthContext(*server_context.auth_context().get());
+  return CreateFromAuthContext(*server_context.auth_context());
 }
 
 StatusOr<EnclaveAuthContext> EnclaveAuthContext::CreateFromAuthContext(
@@ -43,7 +45,19 @@ StatusOr<EnclaveAuthContext> EnclaveAuthContext::CreateFromAuthContext(
   for (auto it = auth_context.begin(); it != auth_context.end(); ++it) {
     ::grpc::AuthProperty auth_property = *it;
 
-    if (auth_property.first == GRPC_ENCLAVE_RECORD_PROTOCOL_PROPERTY_NAME) {
+    if (auth_property.first == GRPC_TRANSPORT_SECURITY_LEVEL_PROPERTY_NAME) {
+      if (auth_property.second !=
+          tsi_security_level_to_string(TSI_PRIVACY_AND_INTEGRITY)) {
+        return Status(error::GoogleError::INVALID_ARGUMENT,
+                      absl::StrCat("Invalid transport security level: ",
+                                   std::string(auth_property.second.data(),
+                                               auth_property.second.size()),
+                                   "; expected ",
+                                   tsi_security_level_to_string(
+                                       TSI_PRIVACY_AND_INTEGRITY)));
+      }
+    } else if (auth_property.first ==
+               GRPC_ENCLAVE_RECORD_PROTOCOL_PROPERTY_NAME) {
       google::protobuf::io::CodedInputStream::ReadLittleEndian32FromArray(
           reinterpret_cast<const uint8_t *>(auth_property.second.data()),
           &record_protocol);
@@ -79,7 +93,9 @@ StatusOr<EnclaveAuthContext> EnclaveAuthContext::CreateFromAuthContext(
 
 EnclaveAuthContext::EnclaveAuthContext(EnclaveIdentities identities,
                                        RecordProtocol record_protocol)
-    : identities_(std::move(identities)), record_protocol_(record_protocol) {}
+    : identities_(
+          {identities.identities().begin(), identities.identities().end()}),
+      record_protocol_(record_protocol) {}
 
 RecordProtocol EnclaveAuthContext::GetRecordProtocol() const {
   return record_protocol_;
@@ -93,17 +109,41 @@ bool EnclaveAuthContext::HasEnclaveIdentity(
 StatusOr<const EnclaveIdentity *> EnclaveAuthContext::FindEnclaveIdentity(
     const EnclaveIdentityDescription &description) const {
   auto it = std::find_if(
-      identities_.identities().cbegin(), identities_.identities().cend(),
+      identities_.cbegin(), identities_.cend(),
       [&description](const EnclaveIdentity &identity) -> bool {
         return identity.description().identity_type() ==
                    description.identity_type() &&
                identity.description().authority_type() ==
                    description.authority_type();
       });
-  if (it == identities_.identities().cend()) {
+  if (it == identities_.cend()) {
     return Status(error::GoogleError::NOT_FOUND, "No matching identity");
   }
   return &*it;
+}
+
+StatusOr<bool> EnclaveAuthContext::EvaluateAcl(
+    const IdentityAclPredicate &acl) const {
+  return EvaluateAcl(acl, /*explanation=*/nullptr);
+}
+
+StatusOr<bool> EnclaveAuthContext::EvaluateAcl(const IdentityAclPredicate &acl,
+                                               std::string *explanation) const {
+  return EvaluateIdentityAcl(identities_, acl, matcher_,
+                             /*explanation=*/explanation);
+}
+
+StatusOr<bool> EnclaveAuthContext::EvaluateAcl(
+    const EnclaveIdentityExpectation &expectation) const {
+  return EvaluateAcl(expectation, /*explanation=*/nullptr);
+}
+
+StatusOr<bool> EnclaveAuthContext::EvaluateAcl(
+    const EnclaveIdentityExpectation &expectation,
+    std::string *explanation) const {
+  IdentityAclPredicate acl;
+  *acl.mutable_expectation() = expectation;
+  return EvaluateAcl(acl, explanation);
 }
 
 }  // namespace asylo

@@ -24,9 +24,7 @@
 #include <string>
 
 #include "asylo/enclave.pb.h"
-#include "asylo/platform/arch/fork.pb.h"
 #include "asylo/platform/core/entry_points.h"
-#include "asylo/platform/core/trusted_global_state.h"
 #include "asylo/util/status.h"
 
 namespace asylo {
@@ -41,17 +39,17 @@ namespace asylo {
 /// class HelloWorld : public TrustedApplication {
 ///  public:
 ///   Status Initialize(const EnclaveConfig &config) override {
-///     enc_untrusted_puts("Hello!");
+///     primitives::TrustedPrimitives::DebugPuts("Hello!");
 ///     return Status::OkStatus();
 ///   }
 ///
 ///   Status Run(const EnclaveInput &input, EnclaveOutput *output) override {
-///     enc_untrusted_puts("Running!");
+///     primitives::TrustedPrimitives::DebugPuts("Running!");
 ///     return Status::OkStatus();
 ///   }
 ///
 ///   Status Finalize(const EnclaveFinal &fini) override {
-///     enc_untrusted_puts("Goodbye!");
+///     primitives::TrustedPrimitives::DebugPuts("Goodbye!");
 ///     return Status::OkStatus();
 ///   }
 /// };
@@ -71,23 +69,6 @@ namespace asylo {
 /// destructible, and any such destructor will never be invoked by the runtime.
 class TrustedApplication {
  public:
-  /// An enumeration of possible enclave runtime states.
-  enum class State {
-    /// Enclave initialization has not started.
-    kUninitialized,
-    /// Asylo internals are initializing.
-    kInternalInitializing,
-    /// Asylo internals are initialized. User-defined initialization is
-    /// in-progress.
-    kUserInitializing,
-    /// All initialization has completed. The enclave is running.
-    kRunning,
-    /// The enclave is finalizing.
-    kFinalizing,
-    /// The enclave has finalized.
-    kFinalized,
-  };
-
   /// \private
   Status InitializeInternal(const EnclaveConfig &config);
 
@@ -126,23 +107,8 @@ class TrustedApplication {
   /// enclave runtime.
   virtual ~TrustedApplication() = default;
 
-  /// Returns the enclave state in a thread-safe manner.
-  State GetState() LOCKS_EXCLUDED(mutex_);
 
  private:
-  // Tracks the current enclave state.
-  State enclave_state_ GUARDED_BY(mutex_) = State::kUninitialized;
-  absl::Mutex mutex_;
-
-  // Verifies the expected enclave state and sets a new one in thread-safe
-  // manner. Returns error if the verification fails.
-  asylo::Status VerifyAndSetState(const State &expected_state,
-                                  const State &new_state)
-      LOCKS_EXCLUDED(mutex_);
-
-  // Sets the enclave state in thread-safe manner.
-  void SetState(const State &state) LOCKS_EXCLUDED(mutex_);
-
   friend int __asylo_user_init(const char *name, const char *config,
                                size_t config_len, char **output,
                                size_t *output_len);
@@ -150,17 +116,6 @@ class TrustedApplication {
                               char **output, size_t *output_len);
   friend int __asylo_user_fini(const char *input, size_t input_len,
                                char **output, size_t *output_len);
-  friend int __asylo_threading_donate();
-  friend int __asylo_handle_signal(const char *input, size_t input_len);
-  friend int __asylo_take_snapshot(char **output, size_t *output_len);
-  friend int __asylo_restore(const char *input, size_t input_len, char **output,
-                             size_t *output_len);
-  friend int __asylo_transfer_secure_snapshot_key(const char *input,
-                                                  size_t input_len,
-                                                  char **output,
-                                                  size_t *output_len);
-
-  friend int __asylo_initiate_migration();
 };
 
 /// User-supplied factory function for making a trusted application instance.

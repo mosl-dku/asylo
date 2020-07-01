@@ -18,6 +18,7 @@
 
 #include "asylo/util/mutex_guarded.h"
 
+#include <atomic>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -34,11 +35,37 @@ namespace asylo {
 namespace {
 
 using ::testing::Eq;
+using ::testing::Ge;
 using ::testing::Gt;
-using ::testing::Ne;
 
 constexpr int kNumThreads = 100;
 constexpr absl::Duration kLongEnoughForThreadSwitch = absl::Milliseconds(500);
+
+struct TypeWithNoDefaultCtor {
+  TypeWithNoDefaultCtor() = delete;
+  explicit TypeWithNoDefaultCtor(int v) : value(v) {}
+  int value;
+};
+
+struct TypeWithDefaultCtor {
+  TypeWithDefaultCtor() : value(31415) {}
+  int value;
+};
+
+// A matcher that expects an absl::optional<> to have no value.
+MATCHER(Nullopt, negation ? "has a value" : "has no value") {
+  return !arg.has_value();
+}
+
+TEST(MutexGuardedTest, CompatibleWithTypesWithoutDefaultCtor) {
+  MutexGuarded<TypeWithNoDefaultCtor> safe(TypeWithNoDefaultCtor(42));
+  EXPECT_THAT(safe.Lock()->value, Eq(42));
+}
+
+TEST(MutexGuardedTest, DefaultCtorSucceeds) {
+  MutexGuarded<TypeWithDefaultCtor> safe;
+  EXPECT_THAT(safe.Lock()->value, Eq(31415));
+}
 
 TEST(MutexGuardedTest, HeldReaderLocksDoNotPreventAcquiringOtherReaderLocks) {
   MutexGuarded<int> safe_int(0);
@@ -46,10 +73,13 @@ TEST(MutexGuardedTest, HeldReaderLocksDoNotPreventAcquiringOtherReaderLocks) {
 
   std::vector<std::thread> threads;
   threads.reserve(kNumThreads);
+  std::atomic<int> num_locks_obtained(0);
   for (int i = 0; i < kNumThreads; ++i) {
-    threads.emplace_back([&barrier, &safe_int] {
+    threads.emplace_back([&barrier, &num_locks_obtained, &safe_int] {
       auto maybe_readable_view = safe_int.ReaderTryLock();
-      ASSERT_THAT(maybe_readable_view, Ne(absl::nullopt));
+      if (maybe_readable_view.has_value()) {
+        ++num_locks_obtained;
+      }
       barrier.Block();
     });
   }
@@ -57,6 +87,10 @@ TEST(MutexGuardedTest, HeldReaderLocksDoNotPreventAcquiringOtherReaderLocks) {
   for (auto &thread : threads) {
     thread.join();
   }
+
+  // absl::Mutex allows ReaderTryLock() to fail occasionally even if no thread
+  // holds the lock exclusively.
+  EXPECT_THAT(num_locks_obtained.load(), Ge(0.9 * kNumThreads));
 }
 
 TEST(MutexGuardedTest, HeldWriterLocksPreventAcquiringOtherWriterLocks) {
@@ -75,7 +109,7 @@ TEST(MutexGuardedTest, HeldWriterLocksPreventAcquiringOtherWriterLocks) {
       if (maybe_writer_view.has_value()) {
         some_thread_acquired_lock.Notify();
       } else {
-        ASSERT_TRUE(some_thread_acquired_lock.WaitForNotificationWithTimeout(
+        EXPECT_TRUE(some_thread_acquired_lock.WaitForNotificationWithTimeout(
             kWaitForSomeThreadToAcquireLock));
       }
       barrier.Block();
@@ -93,7 +127,7 @@ TEST(MutexGuardedTest, HeldReaderLocksPreventAcquiringWriterLocks) {
   auto readable_view = safe_int.ReaderLock();
 
   std::thread try_writer_lock_thread(
-      [&safe_int] { EXPECT_THAT(safe_int.TryLock(), Eq(absl::nullopt)); });
+      [&safe_int] { EXPECT_THAT(safe_int.TryLock(), Nullopt()); });
   try_writer_lock_thread.join();
 }
 
@@ -103,7 +137,7 @@ TEST(MutexGuardedTest, HeldWriterLocksPreventAcquiringReaderLocks) {
   auto writeable_view = safe_int.Lock();
 
   std::thread try_reader_lock_thread([&safe_int] {
-    EXPECT_THAT(safe_int.ReaderTryLock(), Eq(absl::nullopt));
+    EXPECT_THAT(safe_int.ReaderTryLock(), Nullopt());
   });
   try_reader_lock_thread.join();
 }

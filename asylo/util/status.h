@@ -25,6 +25,7 @@
 #include <utility>
 
 #include "absl/meta/type_traits.h"
+#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "asylo/util/logging.h"
 #include "asylo/util/error_codes.h"  // IWYU pragma: export
@@ -204,6 +205,14 @@ class Status {
     return (static_cast<int>(code) == error_code_) &&
            (error::error_enum_traits<Enum>::get_error_space() == error_space_);
   }
+
+  /// Modifies this object to have `context` prepended to the error message.
+  ///
+  /// \param context The context information to be prepended to the error
+  ///        message.
+  /// \return This object with the same error code and an error message of
+  ///         `context` + ": " + the original error message.
+  Status WithPrependedContext(absl::string_view context);
 
  private:
   // Sets this object to hold an error code |code| and error message |message|.

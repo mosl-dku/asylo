@@ -18,19 +18,15 @@
 
 #include <sys/time.h>
 #include <time.h>
+
 #include <atomic>
 #include <cstring>
 
-#include "asylo/platform/arch/include/trusted/host_calls.h"
-#include "asylo/platform/arch/include/trusted/time.h"
 #include "asylo/platform/common/time_util.h"
-#include "asylo/platform/core/shared_name.h"
-#include "asylo/platform/primitives/trusted_runtime.h"
-#include "include/sgx_trts.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 
 using asylo::NanosecondsToTimeSpec;
 using asylo::NanosecondsToTimeVal;
-using asylo::SharedName;
 using asylo::TimeSpecToNanoseconds;
 
 namespace {
@@ -39,86 +35,46 @@ namespace {
 static_assert(sizeof(std::atomic<int64_t>) == sizeof(int64_t),
               "lockfree int64_t is unavailable.");
 
-// Fetches the address of a clock resource, aborting if the address was not
-// found or the returned pointer refers to enclave memory.
-std::atomic<int64_t> *GetClockAddressOrDie(const char *name) {
-  void *addr = enc_untrusted_acquire_shared_resource(kAddressName, name);
-  if (!addr || !enc_is_outside_enclave(addr, sizeof(std::atomic<int64_t>))) {
-    abort();
-  }
-  return static_cast<std::atomic<int64_t> *>(addr);
-}
-
-// Returns the value of a monotonic clock as a number of nanoseconds.
-inline int64_t MonotonicClock() {
-  static std::atomic<int64_t> *clock_monotonic =
-      GetClockAddressOrDie("clock_monotonic");
-  thread_local static int64_t last_tick = *clock_monotonic;
-  if (*clock_monotonic < last_tick) abort();
-  last_tick = *clock_monotonic;
-  return *clock_monotonic;
-}
-
-// Returns the value of a monotonic clock as a number of nanoseconds.
-inline int64_t RealtimeClock() {
-  static std::atomic<int64_t> *clock_realtime =
-      GetClockAddressOrDie("clock_realtime");
-  return *clock_realtime;
-}
-
-// Busy wait with asm("pause").
-static int busy_sleep(const struct timespec *requested) {
-  int64_t deadline = MonotonicClock() + TimeSpecToNanoseconds(requested);
-  while (MonotonicClock() < deadline) {
-    __builtin_ia32_pause();
-  }
-  return 0;
-}
-
 }  // namespace
 
 extern "C" {
 
 // Custom in-enclave nanosleep that will leave the enclave for the standard
-// nanosleep if the requested sleep time is longer than we expect an enclave
-// round-trip to take. Otherwise, busy wait.
+// nanosleep.
 int nanosleep(const struct timespec *requested, struct timespec *remainder) {
-  // If we want to sleep more than 3ms, then exit the enclave to sleep.
-  constexpr int64_t kExitThreshold = INT64_C(3000000);
-  int64_t delay = TimeSpecToNanoseconds(requested);
-  if (delay > kExitThreshold) {
-    return enc_untrusted_nanosleep(requested, remainder);
-  }
-  // Otherwise, wait on the shared clock.
-  if (remainder) {
-    NanosecondsToTimeSpec(remainder, 0);
-  }
-  return busy_sleep(requested);
+  return enc_untrusted_nanosleep(requested, remainder);
 }
 
 int enclave_gettimeofday(struct timeval *__restrict time, void *timezone) {
-  NanosecondsToTimeVal(time, RealtimeClock());
   // The timezone parameter is deprecated by POSIX. Fail if non-null.
   if (timezone) {
     return -1;
   }
-  return 0;
-}
 
+  struct timeval tval {};
+  int result = enc_untrusted_gettimeofday(&tval, nullptr);
+  time->tv_sec = tval.tv_sec;
+  time->tv_usec = tval.tv_usec;
+  return result;
+}
 
 int enclave_times(struct tms *buf) { return enc_untrusted_times(buf); }
 
 int clock_gettime(clockid_t clock_id, struct timespec *time) {
-  switch (clock_id) {
-    case CLOCK_MONOTONIC:
-      NanosecondsToTimeSpec(time, MonotonicClock());
-      return 0;
-    case CLOCK_REALTIME:
-      NanosecondsToTimeSpec(time, RealtimeClock());
-      return 0;
-    default:
-      return -1;
+  int result = enc_untrusted_clock_gettime(clock_id, time);
+  if (clock_id == CLOCK_MONOTONIC) {
+    int64_t clock_monotonic = TimeSpecToNanoseconds(time);
+    thread_local static int64_t last_tick = clock_monotonic;
+    // CLOCK_MONOTONIC should never go backwards.
+    if (clock_monotonic < last_tick) abort();
+    last_tick = clock_monotonic;
   }
+  return result;
+}
+
+
+int clock_getcpuclockid(pid_t pid, clockid_t *clock_id) {
+  return enc_untrusted_clock_getcpuclockid(pid, clock_id);
 }
 
 int getitimer(int which, struct itimerval *curr_value) {

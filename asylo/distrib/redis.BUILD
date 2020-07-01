@@ -2,6 +2,8 @@
 #   Redis (http://redis.io) is an open source, advanced key-value store.
 #   This is a bazel BUILD file for Redis 5.0.5.
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 package(
     default_visibility = ["//visibility:public"],
     features = [
@@ -40,6 +42,7 @@ cc_library(
     ]],
     copts = [
         "-std=c99",
+	"-Wno-unused-function",
         # The definition of macro "__redis_strerror_r" in "hiredis.h" with
         # "GNU_SOURCE" defined has a bug that causes bazel compilation errors
         # when used by "__redisSetErrorFromErrno()" in "net.c".
@@ -60,7 +63,7 @@ cc_library(
 )
 
 # We use the version of Lua bundled with Redis for now, instead of depending
-# on //third_party/lua. We want to make sure Redis users get a consistent
+# on a pre-installed version. We want to make sure Redis users get a consistent
 # experience, down to Lua language features. This reflects the intention of
 # the Redis developers; see
 # https://github.com/antirez/redis/blob/unstable/deps/README.md#lua.
@@ -130,9 +133,10 @@ cc_library(
         "strbuf.h",
     ]] + ["src/solarisfixes.h"],
     copts = [
-        "-Wno-error=empty-body",
-        "-Wno-error=implicit-function-declaration",
-        "-Wno-error=unused-variable",
+        "-Wno-empty-body",
+        "-Wno-implicit-function-declaration",
+        "-Wno-unused-variable",
+	"-Wno-misleading-indentation",
         # Needed to enable the cjson Lua module.
         "-DENABLE_CJSON_GLOBAL",
     ] + ZCALLOC_COPT,
@@ -228,6 +232,7 @@ cc_library(
         "crc64.c",
         "bitops.c",
         "sentinel.c",
+	"siphash.c",
         "notify.c",
         "setproctitle.c",
         "blocked.c",
@@ -251,19 +256,35 @@ cc_library(
     ]] + ["release.h"],
     copts = [
         "-std=c99",
-        # "llroundl" is used in "src/hyperloglog.c", but the arguments are all
-        # doubles, therefore we use llround instead for it since it's sufficent
-        # and we don't currently support "llroundl".
-        "-Dllroundl=llround",
-    ] + ZCALLOC_COPT,
+        "-D_GNU_SOURCE",
+    ] + select({
+        "@com_google_asylo//asylo": [
+	    # "llroundl" is used in "src/hyperloglog.c", but the arguments are
+	    # all doubles, therefore we use llround instead for it since it's
+	    # sufficent and Asylo don't currently support "llroundl".
+            "-Dllroundl=llround",
+        ],
+	"//conditions:default": [
+	    # These flags are needed for bazel to compile Redis client without
+	    # Asylo toolchain.
+	    "-DSYNC_FILE_RANGE_WAIT_BEFORE=1",
+	    "-DSYNC_FILE_RANGE_WRITE=2",
+	],
+    }) + ZCALLOC_COPT,
+    linkopts = select({
+        "@com_google_asylo//asylo": [],
+	"//conditions:default": ["-ldl"],
+    }),
     includes = [
         "deps/hiredis",
         "deps/linenoise",
         "deps/lua/src",
         "src",
     ],
-    nocopts = "-Wframe-larger-than=16384",
-    textual_hdrs = ["src/ae_select.c"],
+    textual_hdrs = [
+        "src/ae_select.c",
+	"src/ae_epoll.c",
+    ],
     deps = [
         ":hiredis_lib",
         ":linenoise_lib",
@@ -317,15 +338,14 @@ cc_library(
         "src/zipmap.h",
     ],
     copts = ZCALLOC_COPT,
-    nocopts = "-Wframe-larger-than=16384",
     deps = [":redis_lib"],
+    alwayslink = 1,
 )
 
 cc_library(
     name = "redis_benchmark",
     srcs = ["src/redis-benchmark.c"],
     copts = ZCALLOC_COPT,
-    nocopts = "-Wframe-larger-than=16384",
     deps = [":redis_lib"],
 )
 
@@ -336,14 +356,20 @@ cc_library(
         "src/help.h",
         "src/redis-cli.c",
     ],
-    copts = ZCALLOC_COPT,
-    nocopts = "-Wframe-larger-than=16384",
-    deps = [":redis_lib"],
+    copts = ["-std=c99"] + ZCALLOC_COPT,
+    deps = [
+        ":redis_lib",
+	":hiredis_lib",
+    ],
+)
+
+cc_binary(
+    name = "redis_cli_bin",
+    deps = [":redis_cli"],
 )
 
 cc_library(
     name = "redis_check_aof",
     srcs = ["src/redis-check-aof.c"],
-    nocopts = "-Wframe-larger-than=16384",
     deps = [":redis_lib"],
 )

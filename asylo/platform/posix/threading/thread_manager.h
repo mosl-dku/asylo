@@ -20,14 +20,15 @@
 #define ASYLO_PLATFORM_POSIX_THREADING_THREAD_MANAGER_H_
 
 #include <pthread.h>
+
 #include <atomic>
 #include <functional>
 #include <memory>
 #include <queue>
 #include <stack>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
-
-#include "absl/container/flat_hash_map.h"
 
 namespace asylo {
 
@@ -46,15 +47,19 @@ class ThreadManager {
   };
 
   // Adds the given |function| to a start_routine queue of functions waiting to
-  // be run by the pthreads implementation. |thread_id_out| will be updated to
-  // the pthread_t of the created thread. |options| contains options for
-  // configuring the thread.
-  int CreateThread(const std::function<void *()> &start_routine,
-                   const ThreadOptions &options, pthread_t *thread_id_out);
+  // be run by the pthreads implementation. |tid| updates the system thread ID
+  // of the new thread. |tls| specifies the pthread TLS address for the new
+  // thread, which stores the pthread info that's used by other pthread calls.
+  int CreateThread(const std::function<int()> &start_routine, pid_t *tid,
+                   void *tls);
 
   // Removes a function from the start_routine queue and runs it. If no
-  // start_routine is present this function will abort().
-  int StartThread();
+  // start_routine is present this function will abort(). |tid| is the system
+  // thread ID from the host.
+  int StartThread(pid_t tid);
+
+  // Updates the result of start function in the ThreadManager.
+  void UpdateThreadResult(pthread_t thread_id, void *ret);
 
   // Waits till given |thread_id| has returned and assigns its returned void* to
   // |return_value|.
@@ -87,7 +92,17 @@ class ThreadManager {
     enum class ThreadState { QUEUED, RUNNING, DONE, JOINED };
 
     // Creates a thread in the QUEUED state with the specified |start_routine|.
-    Thread(const ThreadOptions &options, std::function<void *()> start_routine);
+    Thread(const ThreadOptions &options, std::function<int()> start_routine,
+           void *tls);
+
+    // Sets the system thread ID |tid|.
+    void SetTid(pid_t tid);
+
+    // Updates the result from start function.
+    void UpdateThreadResult(void *ret);
+
+    // Accessor for the pthread TLS address.
+    void *GetThreadTls();
 
     ~Thread() = default;
 
@@ -122,6 +137,11 @@ class ThreadManager {
     // Blocks until this thread is not in |state|.
     void WaitForThreadToExitState(const ThreadState &state);
 
+    // Signals any state waiters, in case their predicates may have changed.
+    // This allows for predicates to WaitForThreadToEnterState to have
+    // conditions that do not necessarily change when the Thread state changes.
+    void SignalStateWaiters();
+
     // Detaches the thread if joinable.
     void Detach();
 
@@ -138,7 +158,7 @@ class ThreadManager {
     void RunCleanupRoutines();
 
     // Function passed to pthread_create() bound to its argument.
-    const std::function<void *()> start_routine_;
+    const std::function<int()> start_routine_;
 
     // Return value of start_routine, set when Run() is complete.
     void *ret_;
@@ -150,7 +170,10 @@ class ThreadManager {
     pthread_mutex_t lock_ = PTHREAD_MUTEX_INITIALIZER;
     pthread_cond_t state_change_cond_ = PTHREAD_COND_INITIALIZER;
     ThreadState state_ = ThreadState::QUEUED;
-    bool detached_ = false;
+    std::atomic<bool> detached_ = false;
+
+    // The pthread TLS address that saves the thread info.
+    void *tls_;
 
     // Stack of cleanup functions that have been pushed and not yet popped or
     // executed.
@@ -161,13 +184,13 @@ class ThreadManager {
   // queued_threads_. Guaranteed to return a valid std::shared_ptr or this
   // function will abort.
   std::shared_ptr<Thread> EnqueueThread(
-      const ThreadOptions &options,
-      const std::function<void *()> &start_routine);
+      const ThreadOptions &options, const std::function<int()> &start_routine,
+      void *tls);
 
   // Removes a Thread object from queued_threads_ and setups up the Thread with
   // pthread_self() as the thread id and adding it to the threads_ map.
   // Guaranteed to return a valid std::shared_ptr or this function will abort.
-  std::shared_ptr<Thread> DequeueThread();
+  std::shared_ptr<Thread> DequeueThread(pid_t tid);
 
   // Returns a Thread pointer for a given |thread_id|.
   std::shared_ptr<Thread> GetThread(pthread_t thread_id);
@@ -182,7 +205,20 @@ class ThreadManager {
   std::queue<std::shared_ptr<Thread>> queued_threads_;
 
   // List of currently running threads or threads waiting to be joined.
-  absl::flat_hash_map<pthread_t, std::shared_ptr<Thread>> threads_;
+  // ThreadManager is used in trusted contexts where system calls might not be
+  // available; avoid using absl based containers which may perform system
+  // calls.
+  std::unordered_map<pthread_t, std::shared_ptr<Thread>> threads_;
+
+  // Set of thread ids that completed during finalize, but were not joined. Keep
+  // track of these in case join is called on the thread after it finishes.
+  std::unordered_set<pthread_t> zombie_threads_;
+
+  // Track whether or not we're finalizing the ThreadManager. Once we enter
+  // finalize, cleanup/join behavior changes slightly to account for enclaves
+  // that don't join all their threads. While finalizing, join becomes a noop
+  // and threads are treated as detached as they complete.
+  std::atomic<bool> finalizing_{false};
 };
 
 }  // namespace asylo

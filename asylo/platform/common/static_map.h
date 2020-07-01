@@ -111,9 +111,9 @@
 
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 
 #include "absl/base/thread_annotations.h"
-#include "absl/container/flat_hash_map.h"
 #include "absl/synchronization/mutex.h"
 #include "asylo/util/logging.h"
 #include "asylo/platform/common/static_map_internal.h"
@@ -151,20 +151,24 @@ struct Namer;
 // a unique key for each element is generated using N.
 //
 // The map used internally is dynamically allocated and is never destroyed
-// during the lifetime of the program (i.e. it is intentionally leaked).
+// during the lifetime of the program (i.e. it is intentionally leaked). Since
+// StaticMap is used in the trusted the primitives interface where system calls
+// might not be available, we use std::unordered_map instead of
+// absl::flat_hash_map to prevent unsafe system calls made by absl based
+// containers.
 template <class MapName, class T, class N = Namer<T>>
 class StaticMap {
  public:
   using value_iterator = internal::ValueIterator<
-      T, typename absl::flat_hash_map<std::string, T *>::iterator>;
+      T, typename std::unordered_map<std::string, T *>::iterator>;
   using const_value_iterator = internal::ValueIterator<
-      const T, typename absl::flat_hash_map<std::string, T *>::const_iterator>;
+      const T, typename std::unordered_map<std::string, T *>::const_iterator>;
 
   // ValueInserter is a helper class whose constructor inserts a pointer to an
   // instance of T into the static map.
   class ValueInserter {
    public:
-    explicit ValueInserter(T *value) LOCKS_EXCLUDED(StaticMap::mu_) {
+    explicit ValueInserter(T *value) ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
 #ifndef __ASYLO__
       static_assert(
           std::is_trivially_default_constructible<N>::value,
@@ -194,34 +198,34 @@ class StaticMap {
     using iterator = StaticMap::value_iterator;
     using const_iterator = StaticMap::const_value_iterator;
 
-    ValueCollection() LOCKS_EXCLUDED(StaticMap::mu_) {
+    ValueCollection() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
 
       // First-time map initialization.
       StaticMap::Initialize();
     }
 
-    iterator begin() LOCKS_EXCLUDED(StaticMap::mu_) {
+    iterator begin() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
       return iterator(StaticMap::map_->begin());
     }
-    const_iterator begin() const LOCKS_EXCLUDED(StaticMap::mu_) {
+    const_iterator begin() const ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
       return const_iterator(StaticMap::map_->cbegin());
     }
-    const_iterator cbegin() const LOCKS_EXCLUDED(StaticMap::mu_) {
+    const_iterator cbegin() const ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
       return const_iterator(StaticMap::map_->cbegin());
     }
-    iterator end() LOCKS_EXCLUDED(StaticMap::mu_) {
+    iterator end() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
       return iterator(StaticMap::map_->end());
     }
-    const_iterator end() const LOCKS_EXCLUDED(StaticMap::mu_) {
+    const_iterator end() const ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
       return const_iterator(StaticMap::map_->cend());
     }
-    const_iterator cend() const LOCKS_EXCLUDED(StaticMap::mu_) {
+    const_iterator cend() const ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
       absl::MutexLock lock(&StaticMap::mu_);
       return const_iterator(StaticMap::map_->cend());
     }
@@ -229,20 +233,21 @@ class StaticMap {
 
   // Returns a ValueCollection object representing the values stored in the
   // static map.
-  static ValueCollection Values() LOCKS_EXCLUDED(StaticMap::mu_) {
+  static ValueCollection Values() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
     return ValueCollection();
   }
 
-  static value_iterator value_begin() LOCKS_EXCLUDED(StaticMap::mu_) {
+  static value_iterator value_begin() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
     return Values().begin();
   }
-  static value_iterator value_end() LOCKS_EXCLUDED(StaticMap::mu_) {
+  static value_iterator value_end() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
     return Values().end();
   }
-  static const_value_iterator value_cbegin() LOCKS_EXCLUDED(StaticMap::mu_) {
+  static const_value_iterator value_cbegin()
+      ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
     return Values().cbegin();
   }
-  static const_value_iterator value_cend() LOCKS_EXCLUDED(StaticMap::mu_) {
+  static const_value_iterator value_cend() ABSL_LOCKS_EXCLUDED(StaticMap::mu_) {
     return Values().cend();
   }
 
@@ -267,19 +272,19 @@ class StaticMap {
   }
 
  private:
-  static void Initialize() EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  static void Initialize() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
     if (map_ == nullptr) {
-      map_ = new absl::flat_hash_map<std::string, T *>();
+      map_ = new std::unordered_map<std::string, T *>();
     }
   }
-  static absl::flat_hash_map<std::string, T *> *map_ GUARDED_BY(mu_)
-      PT_GUARDED_BY(mu_);
+  static std::unordered_map<std::string, T *> *map_ ABSL_GUARDED_BY(mu_)
+      ABSL_PT_GUARDED_BY(mu_);
   static absl::Mutex mu_;
   static N namer_;
 };
 
 template <class MapName, class T, class N>
-absl::flat_hash_map<std::string, T *> *StaticMap<MapName, T, N>::map_ = nullptr;
+std::unordered_map<std::string, T *> *StaticMap<MapName, T, N>::map_ = nullptr;
 
 template <class MapName, class T, class N>
 absl::Mutex StaticMap<MapName, T, N>::mu_;

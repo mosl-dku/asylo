@@ -19,10 +19,11 @@
 
 #include <string>
 
+#include "absl/strings/str_cat.h"
 #include "asylo/platform/primitives/extent.h"
 #include "asylo/platform/primitives/primitive_status.h"
 #include "asylo/platform/primitives/trusted_primitives.h"
-#include "asylo/platform/primitives/trusted_runtime.h"
+#include "asylo/platform/primitives/util/message.h"
 #include "asylo/util/status_macros.h"
 
 using asylo::primitives::EntryHandler;
@@ -35,30 +36,27 @@ namespace primitives {
 namespace {
 
 // Message handler that aborts the enclave.
-PrimitiveStatus Abort(void *context, TrustedParameterStack *params) {
+PrimitiveStatus Abort(void *context, MessageReader *in, MessageWriter *out) {
+  ASYLO_RETURN_IF_READER_NOT_EMPTY(*in);
   TrustedPrimitives::BestEffortAbort("Aborting enclave");
   return PrimitiveStatus::OkStatus();
 }
 
 // Message handler that says hello
-PrimitiveStatus Hello(void *context, TrustedParameterStack *params) {
-  char world_str[] = ", World!";
-  int world_len = strlen(world_str);
+PrimitiveStatus Hello(void *context, MessageReader *in, MessageWriter *out) {
+  ASYLO_RETURN_IF_READER_NOT_EMPTY(*in);
 
-  TrustedParameterStack external_params;
-  ASYLO_RETURN_IF_ERROR(TrustedPrimitives::UntrustedCall(kExternalHelloHandler,
-                                                         &external_params));
-  auto hello_extent = external_params.Pop();
-  int hello_len = hello_extent->size();
-  char *hello_str = hello_extent->As<char>();
+  const char world_str[] = ", World!";
 
-  int len = hello_len + world_len + 1;  // add one for null termination
-  // Use the parameter stack to allocate memory
-  // This memory is visible to Untrusted code
-  Extent hello_world = params->PushAlloc(len);
-  memcpy(hello_world.As<char>(), hello_str, hello_len);
-  memcpy(hello_world.As<char>() + hello_len, world_str, world_len);
-  hello_world.As<char>()[len - 1] = '\0';
+  MessageWriter external_input;
+  MessageReader external_output;
+  ASYLO_RETURN_IF_ERROR(TrustedPrimitives::UntrustedCall(
+      kExternalHelloHandler, &external_input, &external_output));
+  ASYLO_RETURN_IF_INCORRECT_READER_ARGUMENTS(external_output, 1);
+  auto hello_str = external_output.next();
+  std::string hello_world =
+      absl::StrCat(reinterpret_cast<const char *>(hello_str.data()), world_str);
+  out->PushString(hello_world);
   return PrimitiveStatus::OkStatus();
 }
 

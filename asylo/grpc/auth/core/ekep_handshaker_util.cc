@@ -18,12 +18,13 @@
 
 #include "asylo/grpc/auth/core/ekep_handshaker_util.h"
 
+#include <google/protobuf/util/message_differencer.h>
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "asylo/grpc/auth/core/ekep_handshaker.h"
+#include "asylo/identity/attestation/enclave_assertion_generator.h"
+#include "asylo/identity/attestation/enclave_assertion_verifier.h"
 #include "asylo/identity/enclave_assertion_authority.h"
-#include "asylo/identity/enclave_assertion_generator.h"
-#include "asylo/identity/enclave_assertion_verifier.h"
 #include "asylo/util/status.h"
 
 namespace asylo {
@@ -118,8 +119,7 @@ std::vector<AssertionDescription>::const_iterator FindAssertionDescription(
   return std::find_if(
       list.cbegin(), list.cend(),
       [&description](const AssertionDescription &desc) -> bool {
-        return (desc.identity_type() == description.identity_type()) &&
-               (desc.authority_type() == description.authority_type());
+        return google::protobuf::util::MessageDifferencer::Equals(desc, description);
       });
 }
 

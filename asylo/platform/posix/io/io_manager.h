@@ -24,6 +24,7 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <utime.h>
@@ -65,55 +66,49 @@ class IOManager {
     virtual ~IOContext() = default;
 
    protected:
-    // Implements IOManager::Read.
     virtual ssize_t Read(void *buf, size_t count) = 0;
 
-    // Implements IOManager::Write.
     virtual ssize_t Write(const void *buf, size_t count) = 0;
 
-    // Implements IOManager::Close.
     virtual int Close() = 0;
 
-    // Implements IOManager::LSeek.
     virtual int LSeek(off_t offset, int whence) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::Fcntl
     virtual int FCntl(int cmd, int64_t arg) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::FSync.
     virtual int FSync() {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::FDataSync.
     virtual int FDataSync() { return FSync(); }
 
-    // Implements IOManager::FChOwn.
     virtual int FChOwn(uid_t owner, gid_t group) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::FStat.
     virtual int FStat(struct stat *st) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::Isatty.
+    virtual int FStatFs(struct statfs *statfs_buffer) {
+      errno = ENOSYS;
+      return -1;
+    }
+
     virtual int Isatty() {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::FLock.
     virtual int FLock(int operation) {
       errno = ENOSYS;
       return -1;
@@ -124,13 +119,11 @@ class IOManager {
       return -1;
     }
 
-    // Implements IOManager::Ioctl.
     virtual int Ioctl(int request, void *argp) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements IOManager::Writev.
     virtual ssize_t Writev(const struct iovec *iov, int iovcnt) {
       errno = ENOSYS;
       return -1;
@@ -151,88 +144,90 @@ class IOManager {
       return -1;
     }
 
-    // Implements setsockopt.
+    virtual ssize_t FGetXattr(const char *name, void *value, size_t size) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual int FSetXattr(const char *name, const void *value, size_t size,
+                          int flags) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual ssize_t FListXattr(char *list, size_t size) {
+      errno = ENOSYS;
+      return -1;
+    }
+
     virtual int SetSockOpt(int level, int option_name, const void *option_value,
                            socklen_t option_len) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements connect.
     virtual int Connect(const struct sockaddr *addr, socklen_t addrlen) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements shutdown.
     virtual int Shutdown(int how) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements send.
     virtual ssize_t Send(const void *buf, size_t len, int flags) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements getsockopt.
     virtual int GetSockOpt(int level, int optname, void *optval,
                            socklen_t *optlen) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements accept.
     virtual int Accept(struct sockaddr *addr, socklen_t *addrlen) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements bind.
     virtual int Bind(const struct sockaddr *addr, socklen_t addrlen) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements listen.
     virtual int Listen(int backlog) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements sendmsg.
     virtual ssize_t SendMsg(const struct msghdr *msg, int flags) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements recvmsg.
     virtual ssize_t RecvMsg(struct msghdr *msg, int flags) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements getsockname.
     virtual int GetSockName(struct sockaddr *addr, socklen_t *addrlen) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements getpeername.
     virtual int GetPeerName(struct sockaddr *addr, socklen_t *addrlen) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements epoll_ctl.
     virtual int EpollCtl(int op, int hostfd, struct epoll_event *event) {
       // EINVAL since file descriptors do not by default support epoll behavior.
       errno = EINVAL;
       return -1;
     }
 
-    // Implements epoll_wait.
     virtual int EpollWait(struct epoll_event *events, int maxevents,
                           int timeout) {
       // EINVAL since file descriptors do not by defualt support epoll behavior.
@@ -240,19 +235,16 @@ class IOManager {
       return -1;
     }
 
-    // Implements inotify_add_watch.
     virtual int InotifyAddWatch(const char *pathname, uint32_t mask) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements inotify_rm_watch.
     virtual int InotifyRmWatch(int wd) {
       errno = ENOSYS;
       return -1;
     }
 
-    // Implements recvfrom.
     virtual ssize_t RecvFrom(void *buf, size_t len, int flags,
                              struct sockaddr *src_addr, socklen_t *addrlen) {
       errno = ENOSYS;
@@ -263,6 +255,7 @@ class IOManager {
 
    private:
     friend class IOManager;
+    friend class NativePathHandler;
   };
 
   // A VirtualPathHandler maps file paths to appropriate behavior
@@ -301,6 +294,11 @@ class IOManager {
     }
 
     virtual int LStat(const char *pathname, struct stat *stat_buffer) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual int StatFs(const char *pathname, struct statfs *statfs_buffer) {
       errno = ENOSYS;
       return -1;
     }
@@ -346,6 +344,46 @@ class IOManager {
     }
 
     virtual int Utimes(const char *filename, const struct timeval times[2]) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual int InotifyAddWatch(std::shared_ptr<IOContext> context,
+                                const char *pathname, uint32_t mask) {
+      errno = ENOENT;
+      return -1;
+    }
+
+    virtual ssize_t GetXattr(const char *path, const char *name, void *value,
+                             size_t size) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual ssize_t LGetXattr(const char *path, const char *name, void *value,
+                              size_t size) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual int SetXattr(const char *path, const char *name, const void *value,
+                         size_t size, int flags) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual int LSetXattr(const char *path, const char *name, const void *value,
+                          size_t size, int flags) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual ssize_t ListXattr(const char *path, char *list, size_t size) {
+      errno = ENOSYS;
+      return -1;
+    }
+
+    virtual ssize_t LListXattr(const char *path, char *list, size_t size) {
       errno = ENOSYS;
       return -1;
     }
@@ -469,224 +507,267 @@ class IOManager {
   }
 
   // Returns 0 if |path| can be opened, otherwise -1.
-  int Access(const char *path, int mode);
+  virtual int Access(const char *path, int mode);
 
   // Change owner and group of a file. Returns 0 if completed successfully,
   // otherwise returns -1.
-  int Chown(const char *path, uid_t owner, gid_t group);
+  virtual int Chown(const char *path, uid_t owner, gid_t group);
 
   // Creates a hard link to an existing file. Returns 0 on success, otherwise
   // returns -1.
-  int Link(const char *from, const char *to);
+  virtual int Link(const char *from, const char *to);
 
   // Places the contents of the symbolic link |path| in the buffer |buf|.
   // Returns the number of bytes placed in buf on success, otherwise returns -1.
-  ssize_t ReadLink(const char *path, char *buf, size_t bufsize);
+  virtual ssize_t ReadLink(const char *path, char *buf, size_t bufsize);
 
   // Creates a symbolic link |to| which contains the string |from|. Returns 0 on
   // success, otherwise returns -1.
-  int SymLink(const char *from, const char *to);
+  virtual int SymLink(const char *from, const char *to);
 
   // Returns information about a file in the buffer pointed to by |stat_buffer|.
   // Returns 0 on success, otherwise returns -1. If |pathname| is a symlink,
   // returns information about the target it points to.
-  int Stat(const char *pathname, struct stat *stat_buffer);
+  virtual int Stat(const char *pathname, struct stat *stat_buffer);
 
   // Returns information about a file in the buffer pointed to by |stat_buffer|.
   // Returns 0 on success, otherwise returns -1. Unlike Stat, if |pathname| is a
   // symlink, returns information about the link itself, rather than the target
   // it points to.
-  int LStat(const char *pathname, struct stat *stat_buffer);
+  virtual int LStat(const char *pathname, struct stat *stat_buffer);
 
   // Provides a canonicalized absolute pathname that resolves symbolic links.
   // Returns |resolved_path| on success, nullptr on failure.
   char *RealPath(const char *path, char *resolved_path);
 
   // Opens |path|, returning an enclave file descriptor or -1 on failure.
-  int Open(const char *path, int flags, mode_t mode);
+  virtual int Open(const char *path, int flags, mode_t mode);
 
   // Creates a copy of the file descriptor |oldfd| using the next available file
   // descriptor. Returns the new file descriptors on success, and -1 on error.
-  int Dup(int oldfd) LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int Dup(int oldfd) ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Creates a copy of the file descriptor |oldfd| using the file descriptor
   // specified by |newfd|. Returns the new file descriptor on success, and -1 on
   // error.
-  int Dup2(int oldfd, int newfd) LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int Dup2(int oldfd, int newfd) ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Creates a pipe with the given |flags|, which must be a bitwise-or of any
   // combination of O_CLOEXEC, O_DIRECT, and O_NONBLOCK. The array |pipefd| is
   // used to return two file descriptors referring to the ends of the pipe.
   // |pipefd[0]| refers to the read end while |pipefd[1]| refers to the write
   // end.
-  int Pipe(int pipefd[2], int flags);
+  virtual int Pipe(int pipefd[2], int flags);
 
   // Reads up to |count| bytes from the stream into |buf|, returning the number
   // of bytes read on success or -1 on error.
-  int Read(int fd, char *buf, size_t count);
+  virtual int Read(int fd, char *buf, size_t count);
 
   // Writes up to |count| bytes from to |fd| from |buf|, returning the number of
   // bytes written on success or -1 on error.
-  int Write(int fd, const char *buf, size_t count);
+  virtual int Write(int fd, const char *buf, size_t count);
 
   // Closes and finalizes the stream, returning 0 on success or -1 on error.
-  int Close(int fd) LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int Close(int fd) ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Implements fchown(2).
-  int FChOwn(int fd, uid_t owner, gid_t group);
+  virtual int FChOwn(int fd, uid_t owner, gid_t group);
 
   // Implements lseek(2).
-  int LSeek(int fd, off_t offset, int whence);
+  virtual int LSeek(int fd, off_t offset, int whence);
 
   // Implements fchmod(2).
-  int FChMod(int fd, mode_t mode);
+  virtual int FChMod(int fd, mode_t mode);
 
   // Implements fcntl(2).
-  int FCntl(int fd, int cmd, int64_t arg);
+  virtual int FCntl(int fd, int cmd, int64_t arg);
 
   // Implements fsync(2).
-  int FSync(int fd);
+  virtual int FSync(int fd);
 
   // Implements fdatasync(2).
-  int FDataSync(int fd);
+  virtual int FDataSync(int fd);
 
   // Implements ioctl(2).
-  int Ioctl(int fd, int request, void *argp);
+  virtual int Ioctl(int fd, int request, void *argp);
 
   // Implements fstat(2).
-  int FStat(int fd, struct stat *stat_buffer);
+  virtual int FStat(int fd, struct stat *stat_buffer);
+
+  // Implements statfs(2).
+  virtual int StatFs(const char *pathname, struct statfs *statfs_buffer);
+
+  // Implements fstatfs(2).
+  virtual int FStatFs(int fd, struct statfs *statfs_buffer);
 
   // Implements isatty(3).
   int Isatty(int fd);
 
   // Implements flock(2).
-  int FLock(int fd, int operation);
+  virtual int FLock(int fd, int operation);
 
   // Implements unlink(2).
-  int Unlink(const char *pathname);
+  virtual int Unlink(const char *pathname);
 
   // Implements truncate(2).
-  int Truncate(const char *path, off_t length);
+  virtual int Truncate(const char *path, off_t length);
 
   // Implements ftruncate(2).
-  int FTruncate(int fd, off_t length);
+  virtual int FTruncate(int fd, off_t length);
 
   // Implements select(2).
-  int Select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
-             struct timeval *timeout);
+  virtual int Select(int nfds, fd_set *readfds, fd_set *writefds,
+                     fd_set *exceptfds, struct timeval *timeout);
 
   // Implements poll(2).
-  int Poll(struct pollfd *fds, nfds_t nfds, int timeout)
-      LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int Poll(struct pollfd *fds, nfds_t nfds, int timeout)
+      ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Implements epoll_create(2).
-  int EpollCreate(int size) LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int EpollCreate(int size) ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Implements epoll_ctl(2);
-  int EpollCtl(int epfd, int op, int fd, struct epoll_event *event);
+  virtual int EpollCtl(int epfd, int op, int fd, struct epoll_event *event);
 
   // Implements epoll_wait(2);
-  int EpollWait(int epfd, struct epoll_event *events, int maxevents,
-                int timeout);
+  virtual int EpollWait(int epfd, struct epoll_event *events, int maxevents,
+                        int timeout);
 
   // Implements mkdir(2).
-  int Mkdir(const char *pathname, mode_t mode);
+  virtual int Mkdir(const char *pathname, mode_t mode);
 
   // Implements rmdir(2).
-  int RmDir(const char *pathname);
+  virtual int RmDir(const char *pathname);
 
   // Implements rename(2).
-  int Rename(const char *oldpath, const char *newpath);
+  virtual int Rename(const char *oldpath, const char *newpath);
 
   // Implements writev(2).
-  ssize_t Writev(int fd, const struct iovec *iov, int iovcnt);
+  virtual ssize_t Writev(int fd, const struct iovec *iov, int iovcnt);
 
   // Implements readv(2).
-  ssize_t Readv(int fd, const struct iovec *iov, int iovcnt);
+  virtual ssize_t Readv(int fd, const struct iovec *iov, int iovcnt);
 
   // Implements pread(2).
-  ssize_t PRead(int fd, void *buf, size_t count, off_t offset);
+  virtual ssize_t PRead(int fd, void *buf, size_t count, off_t offset);
 
   // Implements umask(2).
-  mode_t Umask(mode_t mask);
+  virtual mode_t Umask(mode_t mask);
 
   // Implements chmod(2).
-  int ChMod(const char *pathname, mode_t mode);
+  virtual int ChMod(const char *pathname, mode_t mode);
 
   // Implements utime(2).
-  int Utime(const char *filename, const struct utimbuf *times);
+  virtual int Utime(const char *filename, const struct utimbuf *times);
 
   // Implements utimes(2).
-  int Utimes(const char *filename, const struct timeval times[2]);
+  virtual int Utimes(const char *filename, const struct timeval times[2]);
 
   // Implements getrlimit(2).
-  int GetRLimit(int resource, struct rlimit *rlim)
-      LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int GetRLimit(int resource, struct rlimit *rlim)
+      ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Implements setrlimit(2).
-  int SetRLimit(int resource, const struct rlimit *rlim)
-      LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int SetRLimit(int resource, const struct rlimit *rlim)
+      ABSL_LOCKS_EXCLUDED(fd_table_lock_);
+
+  // Implements getxattr(2).
+  virtual ssize_t GetXattr(const char *path, const char *name, void *value,
+                           size_t size);
+
+  // Implements lgetxattr(2).
+  virtual ssize_t LGetXattr(const char *path, const char *name, void *value,
+                            size_t size);
+
+  // Implements fgetxattr(2).
+  virtual ssize_t FGetXattr(int fd, const char *name, void *value, size_t size);
+
+  // Implements setxattr(2).
+  virtual int SetXattr(const char *path, const char *name, const void *value,
+                       size_t size, int flags);
+
+  // Implements lsetxattr(2).
+  virtual int LSetXattr(const char *path, const char *name, const void *value,
+                        size_t size, int flags);
+
+  // Implements fsetxattr(2).
+  virtual int FSetXattr(int fd, const char *name, const void *value,
+                        size_t size, int flags);
+
+  // Implements listxattr(2).
+  virtual ssize_t ListXattr(const char *path, char *list, size_t size);
+
+  // Implements llistxattr(2).
+  virtual ssize_t LListXattr(const char *path, char *list, size_t size);
+
+  // Implements flistxattr(2).
+  virtual ssize_t FListXattr(int fd, char *list, size_t size);
 
   // Implements setsockopt(2).
-  int SetSockOpt(int sockfd, int level, int option_name,
-                 const void *option_value, socklen_t option_len);
+  virtual int SetSockOpt(int sockfd, int level, int option_name,
+                         const void *option_value, socklen_t option_len);
 
   // Implements connect(2).
-  int Connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+  virtual int Connect(int sockfd, const struct sockaddr *addr,
+                      socklen_t addrlen);
 
   // Implements shutdown(2).
-  int Shutdown(int sockfd, int how);
+  virtual int Shutdown(int sockfd, int how);
 
   // Implements send(2).
-  ssize_t Send(int sockfd, const void *buf, size_t len, int flags);
+  virtual ssize_t Send(int sockfd, const void *buf, size_t len, int flags);
 
   // Implements getsockopt(2).
-  int GetSockOpt(int sockfd, int level, int optname, void *optval,
-                 socklen_t *optlen);
+  virtual int GetSockOpt(int sockfd, int level, int optname, void *optval,
+                         socklen_t *optlen);
 
   // Implements accept(2).
-  int Accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+  virtual int Accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 
   // Implements bind(2).
-  int Bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+  virtual int Bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
   // Implements listen(2).
-  int Listen(int sockfd, int backlog);
+  virtual int Listen(int sockfd, int backlog);
 
   // Implements sendmsg(2).
-  ssize_t SendMsg(int sockfd, const struct msghdr *msg, int flags);
+  virtual ssize_t SendMsg(int sockfd, const struct msghdr *msg, int flags);
 
   // Implements recvmsg(2).
-  ssize_t RecvMsg(int sockfd, struct msghdr *msg, int flags);
+  virtual ssize_t RecvMsg(int sockfd, struct msghdr *msg, int flags);
 
   // Implements getsockname(2).
-  int GetSockName(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+  virtual int GetSockName(int sockfd, struct sockaddr *addr,
+                          socklen_t *addrlen);
 
   // Implements getpeername(2).
-  int GetPeerName(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+  virtual int GetPeerName(int sockfd, struct sockaddr *addr,
+                          socklen_t *addrlen);
 
   // Implements socket(2).
-  int Socket(int domain, int type, int protocol);
+  virtual int Socket(int domain, int type, int protocol);
 
   // Implements eventfd(2).
-  int EventFd(unsigned int initval, int flags) LOCKS_EXCLUDED(fd_table_lock_);
+  virtual int EventFd(unsigned int initval, int flags)
+      ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
-    // Implements inotify_init(2).
-  int InotifyInit(bool non_block) LOCKS_EXCLUDED(fd_table_lock_);
+  // Implements inotify_init(2).
+  virtual int InotifyInit(bool non_block) ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Implements inotify_add_watch(2).
-  int InotifyAddWatch(int fd, const char *pathname, uint32_t mask);
+  virtual int InotifyAddWatch(int fd, const char *pathname, uint32_t mask);
 
   // Implements inotify_rm_watch(2).
-  int InotifyRmWatch(int fd, int wd);
+  virtual int InotifyRmWatch(int fd, int wd);
 
   // Implements recvfrom(2).
-  ssize_t RecvFrom(int sockfd, void *buf, size_t len, int flags,
-                   struct sockaddr *src_addr, socklen_t *addrlen);
+  virtual ssize_t RecvFrom(int sockfd, void *buf, size_t len, int flags,
+                           struct sockaddr *src_addr, socklen_t *addrlen);
   // Binds an enclave file descriptor to a host file descriptor, returning an
   // enclave file descriptor which will delegate all I/O operations to the host
   // operating system.
-  int RegisterHostFileDescriptor(int host_fd) LOCKS_EXCLUDED(fd_table_lock_);
+  int RegisterHostFileDescriptor(int host_fd)
+      ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Registers the handler responsible for a given path prefix.
   // When processing a path, the handler with the longest prefix shared with the
@@ -704,8 +785,10 @@ class IOManager {
   Status SetCurrentWorkingDirectory(absl::string_view path);
   std::string GetCurrentWorkingDirectory() const;
 
+ protected:
+  IOManager() = default;
+
  private:
-  IOManager() {}
   IOManager(IOManager const &) = delete;
   void operator=(IOManager const &) = delete;
 
@@ -718,7 +801,7 @@ class IOManager {
   // corresponding host file descriptor if this is the last reference to it.
   // This method does not obtain a locker. Caller of this method is responsible
   // for obtaining |fd_table_lock_|.
-  int CloseFileDescriptor(int fd) EXCLUSIVE_LOCKS_REQUIRED(fd_table_lock_);
+  int CloseFileDescriptor(int fd) ABSL_EXCLUSIVE_LOCKS_REQUIRED(fd_table_lock_);
 
   // Fetches the VirtualFileHandler associated with a given path, or
   // nullptr if no entry is found.
@@ -728,7 +811,7 @@ class IOManager {
   template <typename IOAction, typename ReturnType = typename std::result_of<
                                    IOAction(std::shared_ptr<IOContext>)>::type>
   ReturnType CallWithContext(int fd, IOAction action)
-      LOCKS_EXCLUDED(fd_table_lock_);
+      ABSL_LOCKS_EXCLUDED(fd_table_lock_);
 
   // Looks up the appropriate VirtualPathHandler and calls the given function on
   // it.  Errors related to path resolution and handler lookups are handled.
