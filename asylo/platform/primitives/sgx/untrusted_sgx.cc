@@ -87,6 +87,16 @@ static Status TransferSecureSnapshotKey(sgx_enclave_id_t eid, const char *input,
   return Status::OkStatus();
 }
 
+static Status InitiateMigration(sgx_enclave_id_t eid) {
+  int result;
+  sgx_status_t sgx_status;
+  sgx_status = ecall_initiate_migration(eid, &result);
+  if (sgx_status != SGX_SUCCESS) {
+	return Status(sgx_status, "Call to ecall_initiate_migration failed");
+  }
+  return Status::OkStatus();
+}
+
 // Enters the enclave and invokes the snapshotting entry-point. If the ecall
 // fails, return a non-OK status.
 static Status TakeSnapshot(sgx_enclave_id_t eid, char **output,
@@ -444,6 +454,10 @@ Status SgxEnclaveClient::EnterAndTransferSecureSnapshotKey(
   free(output);
 
   return status;
+}
+
+Status SgxClient::InitiateMigration() {
+  return initiate_migration(primitive_sgx_client_->GetEnclaveId());
 }
 
 void SgxEnclaveClient::SetProcessId() { sgx_set_process_id(id_); }
