@@ -30,6 +30,7 @@ int Restore(const char *snapshot_layout, size_t snapshot_layout_len,
 
 int TransferSecureSnapshotKey(const char *input, size_t input_len,
                               char **output, size_t *output_len);
+int InitiateMigration();
 
 }  // namespace asylo
 

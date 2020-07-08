@@ -264,7 +264,8 @@ int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
   // A snapshot should be taken and restored for fork, take a snapshot of the
   // current enclave memory.
   asylo::SnapshotLayout snapshot_layout;
-  asylo::Status status = client->EnterAndTakeSnapshot(&snapshot_layout);
+  asylo::Status status =
+      primitive_client->EnterAndTakeSnapshot(&snapshot_layout);
   if (!status.ok()) {
     LOG(ERROR) << "EnterAndTakeSnapshot failed: " << status;
     errno = ENOMEM;

@@ -28,6 +28,7 @@
 #include "asylo/util/logging.h"
 #include "asylo/platform/primitives/primitives.h"
 #include "asylo/platform/primitives/sgx/fork.h"
+#include "asylo/platform/primitives/sgx/fork_internal.h"
 #include "asylo/platform/primitives/sgx/generated_bridge_t.h"
 #include "asylo/platform/primitives/sgx/trusted_sgx.h"
 #include "asylo/platform/primitives/trusted_primitives.h"

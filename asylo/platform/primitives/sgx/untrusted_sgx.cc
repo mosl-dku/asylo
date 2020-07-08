@@ -457,7 +457,7 @@ Status SgxEnclaveClient::EnterAndTransferSecureSnapshotKey(
 }
 
 Status SgxEnclaveClient::InitiateMigration() {
-  return InitiateMigration(primitive_sgx_client_->GetEnclaveId());
+  return asylo::primitives::InitiateMigration(id_);
 }
 
 void SgxEnclaveClient::SetProcessId() { sgx_set_process_id(id_); }
