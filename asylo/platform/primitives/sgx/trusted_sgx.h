@@ -41,6 +41,9 @@ int asylo_enclave_call(uint64_t selector, void *buffer);
 // Exits the enclave and triggers the fork routine.
 pid_t InvokeFork(const char *enclave_name, bool restore_snapshot);
 
+// Exits the enclave and triggers the migration initiation routine.
+int InvokeInitiateMigration(const char *enclave_name);
+
 // Sends the signal to registered signal handler through SignalManager.
 int DeliverSignal(int klinux_signum, int klinux_sigcode);
 
