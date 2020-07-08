@@ -456,8 +456,8 @@ Status SgxEnclaveClient::EnterAndTransferSecureSnapshotKey(
   return status;
 }
 
-Status SgxClient::InitiateMigration() {
-  return initiate_migration(primitive_sgx_client_->GetEnclaveId());
+Status SgxEnclaveClient::InitiateMigration() {
+  return InitiateMigration(primitive_sgx_client_->GetEnclaveId());
 }
 
 void SgxEnclaveClient::SetProcessId() { sgx_set_process_id(id_); }
