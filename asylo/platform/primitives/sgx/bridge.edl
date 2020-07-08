@@ -95,7 +95,7 @@ enclave {
     
     int ocall_enc_untrusted_initiate_migration(
         [in, string]const char* enclave_name)
-        allow(ecall_take_snapshot, ecall_restore); propagate_errno;
+        allow(ecall_take_snapshot, ecall_restore) propagate_errno;
 
     int ocall_enc_untrusted_register_signal_handler(
         int klinux_signum,
