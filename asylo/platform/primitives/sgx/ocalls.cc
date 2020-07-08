@@ -256,14 +256,11 @@ int ocall_enc_untrusted_register_signal_handler(int klinux_signum,
 void ocall_enc_untrusted__exit(int rc) { _exit(rc); }
 
 int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
-  auto manager_result = asylo::EnclaveManager::Instance();
-  if (!manager_result.ok()) {
+  auto primitive_client = dynamic_cast<asylo::primitives::SgxEnclaveClient *>(
+      asylo::primitives::Client::GetCurrentClient());
+  if (!primitive_client) {
     return -1;
   }
-  asylo::EnclaveManager *manager = manager_result.ValueOrDie();
-  asylo::SgxClient *client = dynamic_cast<asylo::SgxClient *>(
-      manager->GetClient(enclave_name));
-
   // A snapshot should be taken and restored for fork, take a snapshot of the
   // current enclave memory.
   asylo::SnapshotLayout snapshot_layout;
