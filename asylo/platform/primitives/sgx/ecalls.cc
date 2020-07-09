@@ -102,7 +102,7 @@ int ecall_transfer_secure_snapshot_key(const char *input, uint64_t input_len,
 }
 
 int ecall_initiate_migration() {
-  int result;
+  int result = 0;
   asylo::SaveThreadLayoutForSnapshot();
   asylo::SetForkRequested();
   asylo::SetMigrationRequested();
