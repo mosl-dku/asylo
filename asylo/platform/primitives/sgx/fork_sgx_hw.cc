@@ -141,9 +141,9 @@ bool GetSnapshotKey(CleansingVector<uint8_t> *key) {
 }
 
 // Blocks all enclave entries and waits until all enclave entries have exited
-// the enclave and are either blocked from re-entry or staying on the untrusted
-// side. During blocking the calling thread uses |calling_thread_entry_count|
-// entries, and blocking fails if |timeout| expires.
+// the enclave and blocked from re-entry. During blocking the calling thread
+// uses |calling_thread_entry_count| entries, and blocking fails if |timeout|
+// expires.
 Status BlockAndWaitOnEntries(int calling_thread_entry_count, int timeout) {
   enc_block_entries();
   constexpr uint64_t kNanoSecondsPerSecond = 1000000000;
@@ -159,8 +159,7 @@ Status BlockAndWaitOnEntries(int calling_thread_entry_count, int timeout) {
     nanosleep(&ts, /*rem=*/nullptr);
   }
   if (active_entry_count() >
-      blocked_entry_count() + active_exit_count() +
-      calling_thread_entry_count) {
+      blocked_entry_count() + calling_thread_entry_count) {
     enc_unblock_entries();
     return Status(error::GoogleError::INTERNAL,
                   "Timeout while waiting for other TCS to exit the enclave");
@@ -408,8 +407,8 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
   // which calls fork. If other TCS are running inside the enclave, they may
   // modify data/bss/heap and cause an inconsistent snapshot. In that case wait
   // till all other TCS exit the enclave and get blocked from re-entering.
-  // Timeout at 3 seconds.
-  Status status = BlockAndWaitOnEntries(/*allowed_entries=*/2, /*timeout=*/3);
+  // Timeout at 5 seconds.
+  Status status = BlockAndWaitOnEntries(/*allowed_entries=*/2, /*timeout=*/5);
   if (!status.ok()) {
     return status;
   }
@@ -683,16 +682,17 @@ Status RestoreForFork(const char *input, size_t input_len) {
       break;
     }
 
+    // migration do not restore thread stacks
     if (!migration_requested) {
-	  // Now that data is restored, the information of the thread and stack
-	  // address of the calling thread can be retrieved. Decrypts the thread
-		// information and stack.
-		  status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
-		  if (!status.ok()) {
-		    CopyNonOkStatus(status, &error_code, error_message,
-					              ABSL_ARRAYSIZE(error_message));
-		    break;
-		  }
+	    // Now that data is restored, the information of the thread and stack
+	    // address of the calling thread can be retrieved. Decrypts the thread
+      // information and stack.
+      status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
+      if (!status.ok()) {
+      CopyNonOkStatus(status, &error_code, error_message,
+              ABSL_ARRAYSIZE(error_message));
+      break;
+      }
     }
   } while (0);
 
@@ -772,12 +772,10 @@ Status RunEkepHandshake(EkepHandshaker *handshaker, bool is_parent,
       break;
     }
 
-    int flag = O_CREAT | O_WRONLY;
-    int mode S_IRWXU;
-    int fd = enc_untrusted_open("/tmp/enc_snap_key", flag, mode);
-    enc_untrusted_write(fd, encrypted_snapshot_key_string.data(),
-                encrypted_snapshot_key_string.size());
-    enc_untrusted_close(fd);
+    if (enc_untrusted_write(socket, outgoing_bytes.c_str(),
+                            outgoing_bytes.size()) <= 0) {
+      return Status(static_cast<error::PosixError>(errno), "Write failed");
+    }
   }
   return Status::OkStatus();
 }
@@ -852,10 +850,12 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
   }
 
   // Sends the serialized encrypted snapshot key to the child.
-  if (enc_untrusted_write(socket, encrypted_snapshot_key_string.data(),
-                          encrypted_snapshot_key_string.size()) <= 0) {
-    return Status(static_cast<error::PosixError>(errno), "Write failed");
-  }
+  int flag = O_CREAT | O_WRONLY;
+  int mode S_IRWXU;
+  int fd = enc_untrusted_open("/tmp/enc_snap_key", flag, mode);
+  enc_untrusted_write(fd, encrypted_snapshot_key_string.data(),
+						  encrypted_snapshot_key_string.size());
+  enc_untrusted_close(fd);
 
   return Status::OkStatus();
 }
@@ -927,16 +927,15 @@ Status TransferSecureSnapshotKey(
 
   bool is_parent = fork_handshake_config.is_parent();
 
+  // At this point both enclave snapshot and fork() on the host are done. It's
+  // safe to unblock other entries now.
+  if (is_parent) {
+    enc_unblock_entries();
+  }
+
   std::unique_ptr<AeadCryptor> cryptor;
   // TODO: Run Ekep at migration
   if (!migration_requested) {
-
-    // At this point both enclave snapshot and fork() on the host are done. It's
-    // safe to unblock other entries now.
-    if (is_parent) {
-      enc_unblock_entries();
-    }
-
     // The parent should only start a key transfer if it's requested by a fork
     // request inside an enclave.
     if (is_parent && !ClearSnapshotKeyTransferRequested()) {
@@ -977,18 +976,15 @@ Status TransferSecureSnapshotKey(
     CleansingVector<uint8_t> record_protocol_key;
     ASYLO_ASSIGN_OR_RETURN(record_protocol_key,
                           handshaker->GetRecordProtocolKey());
-    //std::unique_ptr<AeadCryptor> cryptor;
     ASYLO_ASSIGN_OR_RETURN(cryptor,
                           AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
-  } else {
-	// migration case
-	CleansingVector<uint8_t> record_protocol_key(kSnapshotKeySize);
-	long long val  = 0x11;
-	memcpy(record_protocol_key.data(), &val, sizeof(long long));
-    ASYLO_ASSIGN_OR_RETURN(cryptor,
-                         AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
+  } else {  // migration case
+    CleansingVector<uint8_t> record_protocol_key(kSnapshotKeySize);
+    long long val  = 0x11;
+    memcpy(record_protocol_key.data(), &val, sizeof(long long));
+      ASYLO_ASSIGN_OR_RETURN(cryptor,
+                          AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
   }
-
   if (is_parent) {
     return EncryptAndSendSnapshotKey(std::move(cryptor),
                                      fork_handshake_config.socket());

@@ -34,7 +34,6 @@
 #include "asylo/platform/primitives/extent.h"
 #include "asylo/platform/primitives/sgx/loader.pb.h"
 #include "asylo/platform/primitives/sgx/untrusted_sgx.h"
-#include "asylo/platform/primitives/sgx/signal_dispatcher.h"
 #include "asylo/util/status.h"
 #include "asylo/util/status_macros.h"
 #include "asylo/util/statusor.h"
@@ -106,17 +105,14 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
 
   Status status;
   status = client->DestroyEnclave();
-  status =
-      primitives::EnclaveSignalDispatcher::GetInstance()->DeregisterAllSignalsForClient(
-          client);
-  LOG_IF(ERROR, !status.ok())
-      << "DeregisterAllSignalsForClient failed: " << status;
+  
+  client->ReleaseMemory();
 
   absl::WriterMutexLock lock(&client_table_lock_);
   const auto &name = name_by_client_[client];
   client_by_name_.erase(name);
   name_by_client_.erase(client);
-  loader_by_client_.erase(client);
+  load_config_by_client_.erase(client);
 
   return status;
 }
