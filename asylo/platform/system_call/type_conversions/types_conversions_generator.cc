@@ -17,10 +17,10 @@
  */
 
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
-#include "absl/container/flat_hash_map.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/strings/str_cat.h"
@@ -32,17 +32,20 @@
 // A struct describing properties and values of a enum desired to be generated
 // by the types conversions generator.
 struct EnumProperties {
-  int default_value_host;
-  int default_value_newlib;
+  int64_t default_value_host;
+  int64_t default_value_enclave;
   bool multi_valued;
   bool skip_conversions;
+  bool or_input_to_default_value;
+  bool wrap_macros_with_if_defined;
+  std::string data_type;
 
   // A vector of enum values in the format std::pair{Enum name, Enum value}.
   // Enum name is simply a literal describing the enum value as a string. This
   // cannot be simply a map from enum values to enum names since multiple enum
   // names may resolve to the same enum value.
   // Eg. AF_UNIX and AF_LOCAL both share the same value (typically 1).
-  std::vector<std::pair<std::string, int>> values;
+  std::vector<std::pair<std::string, int64_t>> values;
 };
 
 // A record describing a C++ struct.
@@ -52,29 +55,28 @@ struct StructProperties {
 
   // A vector of struct members in the format std::pair{member name, member
   // type}.
-  std::map<std::string, std::string> values;
+  std::vector<std::pair<std::string, std::string>> values;
 };
 
 ABSL_FLAG(std::string, output_dir, "",
           "Path of the output dir for generated types.");
 
 // Returns a mapping from enum name to EnumProperties.
-absl::flat_hash_map<std::string, EnumProperties> *GetEnumPropertiesTable() {
-  static auto enum_map =
-      new absl::flat_hash_map<std::string, EnumProperties>{ENUMS_INIT};
+std::map<std::string, EnumProperties> *GetEnumPropertiesTable() {
+  static auto enum_map = new std::map<std::string, EnumProperties>{ENUMS_INIT};
   return enum_map;
 }
 
 // Returns a mapping from struct name to StructProperties.
-absl::flat_hash_map<std::string, StructProperties> *GetStructPropertiesTable() {
+std::map<std::string, StructProperties> *GetStructPropertiesTable() {
   static auto struct_map =
-      new absl::flat_hash_map<std::string, StructProperties>{STRUCTS_INIT};
+      new std::map<std::string, StructProperties>{STRUCTS_INIT};
   return struct_map;
 }
 
 // Writes the provided includes to an output stream. These includes are needed
-// by the type conversion functions for resolving the type definitions in
-// newlib.
+// by the type conversion functions for resolving the type definitions on the
+// host C library.
 void WriteMacroProvidedIncludes(std::ostream *os) {
   std::vector<std::string> includes = {INCLUDES};
   for (const auto &incl : includes) {
@@ -90,22 +92,37 @@ std::string GetOrBasedEnumBody(bool to_prefix, const std::string &enum_name,
   std::ostringstream os;
 
   // Generate result initialization.
-  os << "  *output = "
+  os << "  " << enum_properties.data_type << " output = "
      << (to_prefix ? enum_properties.default_value_host
-                   : enum_properties.default_value_newlib)
+                   : enum_properties.default_value_enclave)
      << ";\n";
 
-  // Generate or-based enum result accumulation.
+  // Generate or-based enum result accumulation. Since there are cases that enum
+  // may contain multiple bits, the value has to be checked explicitly.
   for (const auto &enum_pair : enum_properties.values) {
-    os << "  if (*input & "
+    if (enum_properties.wrap_macros_with_if_defined) {
+      os << "#if defined(" << enum_pair.first << ")\n";
+    }
+    os << "  if ((input & "
        << (to_prefix ? enum_pair.first
                      : absl::StrCat(klinux_prefix, "_", enum_pair.first))
-       << ") *output |= "
+       << ") == "
+       << (to_prefix ? enum_pair.first
+                     : absl::StrCat(klinux_prefix, "_", enum_pair.first))
+       << ") output |= static_cast<" << enum_properties.data_type << ">("
        << (to_prefix ? absl::StrCat(klinux_prefix, "_", enum_pair.first)
                      : enum_pair.first)
-       << ";\n";
+       << ");\n";
+    if (enum_properties.wrap_macros_with_if_defined) {
+      os << "#endif\n";
+    }
   }
 
+  if (enum_properties.or_input_to_default_value) {
+    os << "  output |= static_cast<" << enum_properties.data_type
+       << ">(input);\n";
+  }
+  os << "  return output;\n";
   return os.str();
 }
 
@@ -124,52 +141,59 @@ std::string GetIfBasedEnumBody(bool to_prefix, const std::string &enum_name,
         to_prefix ? absl::StrCat(klinux_prefix, "_", enum_pair.first)
                   : enum_pair.first;
 
+    if (enum_properties.wrap_macros_with_if_defined) {
+      os << "#if defined(" << enum_pair.first << ")\n";
+    }
     os << absl::StrReplaceAll(
-        "  if (*input == $input_val) {\n"
-        "    *output = $output_val;\n"
-        "    return;\n"
-        "  }\n",
+        "  if (input == $input_val) return $output_val;\n",
         {{"$input_val", input_val}, {"$output_val", output_val}});
+    if (enum_properties.wrap_macros_with_if_defined) {
+      os << "#endif\n";
+    }
   }
 
   // Generate code for handling default case.
-  os << "  *output = "
-     << (to_prefix ? enum_properties.default_value_host
-                   : enum_properties.default_value_newlib)
-     << ";\n";
-
+  int64_t default_output = to_prefix ? enum_properties.default_value_host
+                                     : enum_properties.default_value_enclave;
+  if (enum_properties.or_input_to_default_value) {
+    os << "  return " << default_output << " | input;\n";
+  } else {
+    os << "  return " << default_output << ";\n";
+  }
   return os.str();
 }
 
 // Generate the function definition for struct type conversions. Depending on
-// the value provided for |to_bridge|, this function generates the function
-// definition for conversions to and from bridge struct types respectively.
+// the value provided for |to_klinux|, this function generates the function
+// definition for conversions to and from kernel struct types respectively.
 std::string GetStructConversionsFuncBody(
-    bool to_bridge, const std::string &input_struct,
+    bool to_klinux, const std::string &input_struct,
     const std::string &output_struct,
     const StructProperties &struct_properties) {
   std::ostringstream os;
-  os << "  if (!" << input_struct << " || !" << output_struct << ") return;\n";
+  os << "  if (!" << input_struct << " || !" << output_struct
+     << ") return false;\n";
 
-  for (const auto &member_decl : struct_properties.values) {
-    std::string bridge_member =
-        absl::StrCat(bridge_prefix, "_", member_decl.first);
+  for (const auto &member_pair : struct_properties.values) {
+    std::string klinux_member =
+        absl::StrCat(klinux_prefix, "_", member_pair.first);
 
-    std::string output_member = to_bridge ? bridge_member : member_decl.first;
-    std::string input_member = to_bridge ? member_decl.first : bridge_member;
+    std::string output_member = to_klinux ? klinux_member : member_pair.first;
+    std::string input_member = to_klinux ? member_pair.first : klinux_member;
     os << "  " << output_struct << "->" << output_member << " = "
        << input_struct << "->" << input_member << ";\n";
   }
 
   os << "\n";
+  os << "  return true;\n";
   return os.str();
 }
 
 // Generate and write enum conversion function declarations and definitions to
 // provided output streams for .h and .cc files.
-void WriteEnumConversions(const absl::flat_hash_map<std::string, EnumProperties>
-                              *enum_properties_table,
-                          std::ostream *os_h, std::ostream *os_cc) {
+void WriteEnumConversions(
+    const std::map<std::string, EnumProperties> *enum_properties_table,
+    std::ostream *os_h, std::ostream *os_cc) {
   for (const auto &it : *enum_properties_table) {
     if (it.second.skip_conversions) {
       continue;
@@ -180,11 +204,15 @@ void WriteEnumConversions(const absl::flat_hash_map<std::string, EnumProperties>
                    enum_name_lower.begin(), ::tolower);
 
     std::string to_prefix_decl = absl::StrReplaceAll(
-        "void To$klinux_prefix$enum_name(const int *input, int *output)",
-        {{"$klinux_prefix", klinux_prefix}, {"$enum_name", it.first}});
+        "$data_type To$klinux_prefix$enum_name($data_type input)",
+        {{"$klinux_prefix", klinux_prefix},
+         {"$enum_name", it.first},
+         {"$data_type", it.second.data_type}});
     std::string from_prefix_decl = absl::StrReplaceAll(
-        "void From$klinux_prefix$enum_name(const int *input, int *output)",
-        {{"$klinux_prefix", klinux_prefix}, {"$enum_name", it.first}});
+        "$data_type From$klinux_prefix$enum_name($data_type input)",
+        {{"$klinux_prefix", klinux_prefix},
+         {"$enum_name", it.first},
+         {"$data_type", it.second.data_type}});
 
     // Write the function declarations to the header file.
     *os_h << "\n" << to_prefix_decl << "; \n";
@@ -212,8 +240,7 @@ void WriteEnumConversions(const absl::flat_hash_map<std::string, EnumProperties>
 // Generate and write struct conversion function declarations and definitions to
 // provided output streams for .h and .cc files.
 void WriteStructConversions(
-    const absl::flat_hash_map<std::string, StructProperties>
-        *struct_properties_table,
+    const std::map<std::string, StructProperties> *struct_properties_table,
     std::ostream *os_h, std::ostream *os_cc) {
   for (const auto &it : *struct_properties_table) {
     if (it.second.skip_conversions) {
@@ -221,39 +248,39 @@ void WriteStructConversions(
     }
 
     std::string struct_var = absl::StrCat("_", it.first);
-    std::string bridge_struct_var =
-        absl::StrCat("_", bridge_prefix, struct_var);
+    std::string klinux_struct_var =
+        absl::StrCat("_", klinux_prefix, struct_var);
 
-    std::string to_bridge_declaration = absl::StrReplaceAll(
-        "void To$bridge_prefix$name"
+    std::string to_klinux_declaration = absl::StrReplaceAll(
+        "bool To$klinux_prefix$name"
         "(const struct $name *$struct_var, "
-        "struct $bridge_prefix_$name *$bridge_struct_var)",
-        {{"$bridge_prefix", bridge_prefix},
+        "struct $klinux_prefix_$name *$klinux_struct_var)",
+        {{"$klinux_prefix", klinux_prefix},
          {"$name", it.first},
          {"$struct_var", struct_var},
-         {"$bridge_struct_var", bridge_struct_var}});
+         {"$klinux_struct_var", klinux_struct_var}});
 
-    std::string from_bridge_declaration = absl::StrReplaceAll(
-        "void From$bridge_prefix$name(const struct "
-        "$bridge_prefix_$name *$bridge_struct_var, struct $name *$struct_var)",
-        {{"$bridge_prefix", bridge_prefix},
+    std::string from_klinux_declaration = absl::StrReplaceAll(
+        "bool From$klinux_prefix$name(const struct "
+        "$klinux_prefix_$name *$klinux_struct_var, struct $name *$struct_var)",
+        {{"$klinux_prefix", klinux_prefix},
          {"$name", it.first},
          {"$struct_var", struct_var},
-         {"$bridge_struct_var", bridge_struct_var}});
+         {"$klinux_struct_var", klinux_struct_var}});
 
     // Write the function declarations to the header file.
-    *os_h << "\n" << to_bridge_declaration << "; \n";
-    *os_h << "\n" << from_bridge_declaration << "; \n";
+    *os_h << "\n" << to_klinux_declaration << "; \n";
+    *os_h << "\n" << from_klinux_declaration << "; \n";
 
     // Write the function body to the cc file.
     *os_cc << "\n"
-           << to_bridge_declaration << " {\n"
-           << GetStructConversionsFuncBody(true, struct_var, bridge_struct_var,
+           << to_klinux_declaration << " {\n"
+           << GetStructConversionsFuncBody(true, struct_var, klinux_struct_var,
                                            it.second)
            << "}\n";
     *os_cc << "\n"
-           << from_bridge_declaration << " {\n"
-           << GetStructConversionsFuncBody(false, bridge_struct_var, struct_var,
+           << from_klinux_declaration << " {\n"
+           << GetStructConversionsFuncBody(false, klinux_struct_var, struct_var,
                                            it.second)
            << "}\n";
   }
@@ -261,11 +288,12 @@ void WriteStructConversions(
 
 // Writes enum definitions obtained from |enum_properties_table| to an output
 // stream provided.
-void WriteEnumDefinitions(const absl::flat_hash_map<std::string, EnumProperties>
-                              *enum_properties_table,
-                          std::ostream *os) {
+void WriteEnumDefinitions(
+    const std::map<std::string, EnumProperties> *enum_properties_table,
+    std::ostream *os) {
   for (const auto &it : *enum_properties_table) {
-    *os << absl::StreamFormat("\nenum %s {\n", it.first);
+    *os << absl::StreamFormat("\nenum %s : %s {\n", it.first,
+                              it.second.data_type);
 
     // Accumulate comma separated resolved enum pairs (eg. kLinux_F_GETFD = 1,
     // kLinux_F_SETFD = 2,).
@@ -280,16 +308,15 @@ void WriteEnumDefinitions(const absl::flat_hash_map<std::string, EnumProperties>
 // Writes struct definitions obtained from |struct_properties_table| to an
 // output stream provided.
 void WriteStructDefinitions(
-    const absl::flat_hash_map<std::string, StructProperties>
-        *struct_properties_table,
+    const std::map<std::string, StructProperties> *struct_properties_table,
     std::ostream *os) {
   for (const auto &it : *struct_properties_table) {
-    *os << absl::StreamFormat("\nstruct %s_%s {\n", bridge_prefix, it.first);
+    *os << absl::StreamFormat("\nstruct %s_%s {\n", klinux_prefix, it.first);
 
     for (const auto &current : it.second.values) {
-      // Prefix |bridge_prefix| to each member name to avoid possible
-      // collisions with macro names in newlib/libc.
-      *os << absl::StreamFormat("  %s %s_%s;\n", current.second, bridge_prefix,
+      // Prefix |klinux_prefix| to each member name to avoid possible
+      // collisions with macro names in enclave C library/host C library.
+      *os << absl::StreamFormat("  %s %s_%s;\n", current.second, klinux_prefix,
                                 current.first);
     }
     *os << "}" << (it.second.pack_attributes ? " ABSL_ATTRIBUTE_PACKED" : "")
@@ -298,13 +325,11 @@ void WriteStructDefinitions(
 }
 
 // Gets the mappings from type names to type properties and emits the C
-// definitions for the types. Prefixes the appropriate klinux or bridge prefix
+// definitions for the types. Prefixes the appropriate klinux or klinux prefix
 // to the type definitions generated. Currently supports enums and structs.
 void WriteTypeDefinitions(
-    const absl::flat_hash_map<std::string, EnumProperties>
-        *enum_properties_table,
-    const absl::flat_hash_map<std::string, StructProperties>
-        *struct_properties_table,
+    const std::map<std::string, EnumProperties> *enum_properties_table,
+    const std::map<std::string, StructProperties> *struct_properties_table,
     std::ostream *os) {
   // Write #ifdef guard
   std::string header_guard =
@@ -332,8 +357,8 @@ void WriteTypeDefinitions(
 // the corresponding implementations to |os_cc|. Currently supports enums and
 // structs.
 void WriteTypesConversions(
-    absl::flat_hash_map<std::string, EnumProperties> *enum_properties_table,
-    absl::flat_hash_map<std::string, StructProperties> *struct_properties_table,
+    std::map<std::string, EnumProperties> *enum_properties_table,
+    std::map<std::string, StructProperties> *struct_properties_table,
     std::ostream *os_h, std::ostream *os_cc) {
   // Write #ifdef guard for .h file.
   std::string header_guard =

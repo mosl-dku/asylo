@@ -193,33 +193,54 @@ ABSL_FLAG(std::string, message, "", "Message to encrypt");
 int main(int argc, char *argv[]) {
   absl::ParseCommandLine(argc, argv);
 
-  LOG_IF(QFATAL, absl::GetFlag(FLAGS_message).empty()) << "Empty --message flag";
+  constexpr char kEnclaveName[] = "demo_enclave";
+
+  const std::string message = absl::GetFlag(FLAGS_message);
+  LOG_IF(QFATAL, message.empty()) << "Empty --message flag.";
+
+  const std::string enclave_path = absl::GetFlag(FLAGS_enclave_path);
+  LOG_IF(QFATAL, enclave_path.empty()) << "Empty --enclave_path flag.";
 
   // Part 1: Initialization
 
+  // Prepare |EnclaveManager| with default |EnclaveManagerOptions|
   asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
   auto manager_result = asylo::EnclaveManager::Instance();
   LOG_IF(QFATAL, !manager_result.ok()) << "Could not obtain EnclaveManager";
 
+  // Prepare |load_config| message.
+  asylo::EnclaveLoadConfig load_config;
+  load_config.set_name(kEnclaveName);
+
+  // Prepare |sgx_config| message.
+  auto sgx_config = load_config.MutableExtension(asylo::sgx_load_config);
+  sgx_config->set_debug(true);
+  auto file_enclave_config = sgx_config->mutable_file_enclave_config();
+  file_enclave_config->set_enclave_path(enclave_path);
+
+  // Load Enclave with prepared |EnclaveManager| and |load_config| message.
   asylo::EnclaveManager *manager = manager_result.ValueOrDie();
-  asylo::SimLoader loader(absl::GetFlag(FLAGS_enclave_path), /*debug=*/true);
-  asylo::Status status = manager->LoadEnclave("demo_enclave", loader);
+  auto status = manager->LoadEnclave(load_config);
   LOG_IF(QFATAL, !status.ok()) << "LoadEnclave failed with: " << status;
 
   // Part 2: Secure execution
 
-  asylo::EnclaveClient *client = manager->GetClient("demo_enclave");
+  // Prepare |input| with |message| and create |output| to retrieve response
+  // from enclave.
   asylo::EnclaveInput input;
-  SetEnclaveUserMessage(&input, absl::GetFlag(FLAGS_message));
-
+  SetEnclaveUserMessage(&input, message);
   asylo::EnclaveOutput output;
+
+  // Get |EnclaveClient| for loaded enclave and execute |EnterAndRun|.
+  asylo::EnclaveClient *const client = manager->GetClient(kEnclaveName);
   status = client->EnterAndRun(input, &output);
   LOG_IF(QFATAL, !status.ok()) << "EnterAndRun failed with: " << status;
 
   // Part 3: Finalization
 
-  asylo::EnclaveFinal final_input;
-  status = manager->DestroyEnclave(client, final_input);
+  // |DestroyEnclave| before exiting program.
+  asylo::EnclaveFinal empty_final_input;
+  status = manager->DestroyEnclave(client, empty_final_input);
   LOG_IF(QFATAL, !status.ok()) << "DestroyEnclave failed with: " << status;
 
   return 0;
@@ -236,7 +257,8 @@ application:
 
 1.  Configures an instance of `EnclaveManager` with default options. The
     `EnclaveManager` handles all enclave resources in an untrusted application.
-2.  Configures a `SimLoader` object to fetch the enclave binary image from disk.
+2.  Configures a `EnclaveLoadConfig` object to specify options for the
+    SgxLoadConfig to fetch the enclave binary image from disk.
 3.  Calls `EnclaveManager::LoadEnclave` to bind the enclave to the name `"demo
     enclave"`. This call implicitly invokes the enclave's `Initialize` method.
 
@@ -245,10 +267,10 @@ application:
 The untrusted application performs the following steps to securely execute a
 workload in the trusted application:
 
-1.  Gets a handle to the enclave via `EnclaveManager::GetClient`.
-2.  Provides arbitrary input data in an `EnclaveInput`. This example uses a
+1.  Provides arbitrary input data in an `EnclaveInput`. This example uses a
     single string protobuf extension to the `EnclaveInput` message. This
     extension field is used to pass data to the enclave for encryption.
+2.  Gets a handle to the enclave via `EnclaveManager::GetClient`.
 3.  Invokes the enclave by calling `EnclaveClient::EnterAndRun`. This method is
     the primary entry point used to dispatch messages to the enclave. It can be
     called an arbitrary number of times.
@@ -281,18 +303,22 @@ constexpr uint8_t kAesKey128[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
                                   0x12, 0x13, 0x14, 0x15};
 
 // Encrypts a message against `kAesKey128` and returns a 12-byte nonce followed
-// by authenticated ciphertext, encoded as a hex string. `message` must be less
-// than or equal to `kMaxMessageSize` in length.
+// by authenticated ciphertext, encoded as a hex string.
 const StatusOr<std::string> EncryptMessage(const std::string &message) {
-  AesGcmSivCryptor cryptor(kMaxMessageSize, new AesGcmSivNonceGenerator());
+  std::unique_ptr<AeadCryptor> cryptor;
+  ASYLO_ASSIGN_OR_RETURN(cryptor,
+                         AeadCryptor::CreateAesGcmSivCryptor(kAesKey128));
 
-  CleansingVector<uint8_t> key(kAesKey128, kAesKey128 + arraysize(kAesKey128));
-  CleansingString additional_authenticated_data;
-  CleansingString nonce;
-  CleansingString ciphertext;
-  ASYLO_RETURN_IF_ERROR(cryptor.Seal(key, additional_authenticated_data,
-                                     message, &nonce, &ciphertext));
-  return absl::BytesToHexString(absl::StrCat(nonce, ciphertext));
+  std::vector<uint8_t> additional_authenticated_data;
+  std::vector<uint8_t> nonce(cryptor->NonceSize());
+  std::vector<uint8_t> ciphertext(message.size() + cryptor->MaxSealOverhead());
+  size_t ciphertext_size;
+
+  ASYLO_RETURN_IF_ERROR(cryptor->Seal(
+      message, additional_authenticated_data, absl::MakeSpan(nonce),
+      absl::MakeSpan(ciphertext), &ciphertext_size));
+
+  return absl::StrCat(BytesToHexString(nonce), BytesToHexString(ciphertext));
 }
 
 class EnclaveDemo : public TrustedApplication {
@@ -349,34 +375,47 @@ cc_proto_library(
     deps = [":demo_proto"],
 )
 
-sim_enclave(
-    name = "demo_enclave",
+cc_unsigned_enclave(
+    name = "demo_enclave_unsigned.so",
     srcs = ["demo_enclave.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":demo_cc_proto",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings",
         "//asylo:enclave_runtime",
+        "//asylo/crypto:aead_cryptor",
+        "//asylo/util:cleansing_types",
+        "//asylo/util:status",
     ],
+)
+
+debug_sign_enclave(
+    name = "demo_enclave.so",
+    unsigned = "demo_enclave_unsigned.so",
 )
 
 enclave_loader(
     name = "quickstart",
     srcs = ["demo_driver.cc"],
-    enclaves = {"enclave": ":demo_enclave"},
+    enclaves = {"enclave": ":demo_enclave.so"},
     loader_args = ["--enclave_path='{enclave}'"],
     deps = [
         ":demo_cc_proto",
-        "//asylo:enclave_client",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
+        "//asylo:enclave_client",
         "//asylo/util:logging",
     ],
 )
 ```
 
 The [Bazel](https://bazel.build) BUILD file shown above defines our enclave's
-logic in a `sim_enclave` called `demo_enclave`. This target contains our
-implementation of `TrustedApplication` and is linked against the Asylo runtime.
-We use a `sim_enclave` rule to generate an enclave that can be run in simulation
-mode.
+logic in a `cc_unsigned_enclave` called `demo_enclave_unsigned.so`. This target
+contains our implementation of `TrustedApplication` and is linked against the
+Asylo runtime. We use a `debug_sign_enclave` rule to generate an enclave that
+has been signed with a debug key, and can be run in supported backends (e.g.,
+SGX simulation mode or on SGX hardware in debug mode).
 
 The untrusted component is the target `:quickstart`, which contains code to
 handle the logic of initializing, running, and finalizing the enclave, as well
@@ -390,8 +429,8 @@ specifies the enclave's path.
 
 Let us now run the demo enclave inside the Docker image we downloaded
 [above](#getting-started-with-the-example-code). You can set the `--message`
-flag passed to the `//quickstart` target to contain any string that you would
-like to encrypt.
+flag passed to the `//quickstart_sgx_sim` target to contain any string that you
+would like to encrypt.
 
 Note: The following command runs the enclave in simulation mode.
 
@@ -401,7 +440,7 @@ docker run -it --rm \
     -v "${MY_PROJECT}":/opt/my-project \
     -w /opt/my-project \
     gcr.io/asylo-framework/asylo \
-    bazel run --config=enc-sim //quickstart -- --message="Asylo Rocks"
+    bazel run //quickstart_sgx_sim -- --message="Asylo Rocks"
 Encrypted message:
 2dc402068266ba995608e0d4a16c1604b792355d4635dec43cf2888cf2036d2007772ed5f24e5c
 ```

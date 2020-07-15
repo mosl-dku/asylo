@@ -14,14 +14,15 @@
 # limitations under the License.
 #
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//asylo/bazel:asylo.bzl", "cc_enclave_test")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
 licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = ["//asylo:implementation"],
 )
-
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
-load("//asylo/bazel:asylo.bzl", "cc_enclave_test")
 
 cc_library(
     name = "memory",
@@ -37,6 +38,7 @@ cc_enclave_test(
     deps = [
         ":memory",
         "//asylo/platform/primitives:trusted_backend",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/synchronization",
         "@com_google_googletest//:gtest",
     ],

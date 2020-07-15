@@ -14,9 +14,12 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKEND_TAGS")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])
 
 package(
     default_visibility = ["//asylo:implementation"],
@@ -27,15 +30,66 @@ cc_library(
     name = "primitives",
     hdrs = [
         "extent.h",
-        "parameter_stack.h",
         "primitive_status.h",
         "primitives.h",
     ],
     copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//visibility:public"],
     deps = [
         "//asylo/util:error_codes",
-        "@com_google_absl//absl/strings",
     ],
+)
+
+# Loader for Asylo enclaves. The target conditionally selects remote enclave
+# loader targets contingent on the user passing the config setting for remote
+# enclaves. Else, the `local_enclave_loader` target conditionally selects the
+# enclave loader targets for enclaves to be loaded locally.
+cc_library(
+    name = "enclave_loader",
+    hdrs = [
+        "enclave_loader.h",
+    ],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        "//asylo:enclave_cc_proto",
+        ":untrusted_primitives",
+    ] + select({
+        "//asylo/platform/primitives:asylo_remote": [
+            "//asylo/platform/primitives/remote:enclave_loader",
+        ],
+        "//conditions:default": [":local_enclave_loader"],
+    }),
+)
+
+# Loader for locally loaded Asylo enclaves. No other target than :enclave_loader
+# should depend on this target directly.
+cc_library(
+    name = "local_enclave_loader",
+    copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//visibility:private"],
+    deps = ["//asylo/platform/primitives/sgx:enclave_loader"],
+)
+
+# Primitive API enclave loader header.
+cc_library(
+    name = "enclave_loader_hdr",
+    hdrs = ["enclave_loader.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":untrusted_primitives",
+        "//asylo:enclave_cc_proto",
+    ],
+)
+
+# A shared trusted runtime component that generates many bytes of randomness
+# with RDRAND.
+cc_library(
+    name = "random_bytes",
+    srcs = ["random_bytes.cc"],
+    hdrs = ["random_bytes.h"],
+    copts = ["-mrdrnd"],
+    visibility = ["//asylo:implementation"],
+    deps = [":trusted_runtime"],
 )
 
 # Primitive API headers for untrusted code.
@@ -44,27 +98,39 @@ cc_library(
     srcs = ["untrusted_primitives.cc"],
     hdrs = ["untrusted_primitives.h"],
     copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//visibility:public"],
     deps = [
         ":primitives",
+        "//asylo/platform/primitives/util:message_reader_writer",
         "//asylo/platform/primitives/util:status_conversions",
         "//asylo/util:asylo_macros",
+        "//asylo/util:mutex_guarded",
         "//asylo/util:status",
+        "@com_google_absl//absl/base:core_headers",
     ],
 )
 
 # Target exposing trusted backend-dependent components for the build configuration.
+_TRUSTED_BACKEND_SGX_DEPS = [
+    "//asylo/platform/primitives/sgx:trusted_sgx",
+    "//asylo/platform/primitives/sgx:trusted_fork",
+]
+
 cc_library(
     name = "trusted_backend",
     hdrs = [
         "trusted_runtime.h",
-        "//asylo/platform/primitives/util:trusted_memory.h",
     ],
     copts = ASYLO_DEFAULT_COPTS,
-    deps = [":primitives"] + select({
-        "//asylo/platform/primitives:sgx": [
-            "//asylo/platform/primitives/sgx:trusted_sgx",
-        ],
-        "//conditions:default": [],
+    tags = ASYLO_ALL_BACKEND_TAGS,
+    deps = [":primitives"] + select(
+        {
+            "@com_google_asylo//asylo": [":trusted_primitives"],
+        },
+        no_match_error = "Must be built in the Asylo toolchain",
+    ) + select({
+        ":asylo_dlopen": [],
+        "//conditions:default": _TRUSTED_BACKEND_SGX_DEPS,
     }),
 )
 
@@ -73,8 +139,10 @@ cc_library(
     name = "trusted_primitives",
     hdrs = ["trusted_primitives.h"],
     copts = ASYLO_DEFAULT_COPTS,
+    visibility = ["//visibility:public"],
     deps = [
         ":primitives",
+        "//asylo/platform/primitives/util:message_reader_writer",
         "//asylo/util:asylo_macros",
     ],
 )
@@ -85,19 +153,6 @@ cc_library(
     hdrs = ["trusted_runtime.h"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [":primitives"],
-)
-
-# Test ParameterStack implementation.
-cc_test(
-    name = "parameter_stack_test",
-    size = "small",
-    srcs = ["parameter_stack_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":primitives",
-        "//asylo/test/util:test_main",
-        "@com_google_googletest//:gtest",
-    ],
 )
 
 # Test extent implementation.
@@ -128,26 +183,35 @@ cc_test(
     ],
 )
 
-# Configuration setting for the primitives/sim backend.
 config_setting(
-    name = "asylo_sim",
-    values = {
-        "define": "ASYLO_SIM=1",
+    name = "asylo_dlopen_by_flag",
+    flag_values = {
+        "@com_google_asylo_backend_provider//:backend": "//asylo/platform/primitives/dlopen",
     },
 )
 
-# Configuration setting for the primitives/sgx backend.
+# Configuration setting for the primitives/dlopen backend.
 config_setting(
-    name = "asylo_sgx",
+    name = "asylo_dlopen_deprecated_config",
     values = {
-        "define": "ASYLO_SGX=1",
+        "define": "ASYLO_DLOPEN=1",
     },
 )
 
-# Set when we are compiling for sgx backend.
+selects.config_setting_group(
+    name = "asylo_dlopen",
+    match_any = [
+        ":asylo_dlopen_deprecated_config",
+        ":asylo_dlopen_by_flag",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Configuration setting for remote enclaves.
 config_setting(
-    name = "sgx",
+    name = "asylo_remote",
     values = {
-        "crosstool_top": "@com_google_asylo_toolchain//toolchain:crosstool",
+        "define": "ASYLO_REMOTE=1",
     },
+    visibility = ["//visibility:public"],
 )

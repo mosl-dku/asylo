@@ -14,9 +14,10 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
+load("@rules_cc//cc:defs.bzl", "cc_test")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 cc_test(
     name = "loader_test",
@@ -24,6 +25,7 @@ cc_test(
     srcs = ["loader_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        "//asylo:enclave_cc_proto",
         "//asylo:enclave_client",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",

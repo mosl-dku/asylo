@@ -14,27 +14,41 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
 # BUILD file needed to make bzl files available to load.
 
-exports_files([
-    "asylo.bzl",
-    "asylo_deps.bzl",
-    "install_path.bzl",
-    "patch_repository.bzl",
-    "proto.bzl",
-    "sgx_deps.bzl",
-    "sim_enclave.bzl",
-])
-
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "//asylo/bazel:asylo.bzl",
     "ASYLO_ALL_BACKENDS",
+    "ASYLO_ALL_BACKEND_TAGS",
     "cc_enclave_test",
     "embed_enclaves",
 )
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])
+
+exports_files([
+    "asylo.bzl",
+    "asylo_deps.bzl",
+    "copts.bzl",
+    "dlopen_enclave.bzl",
+    "installation_path.bzl",
+    "passing_test.sh",
+    "remote_deps.bzl",
+    "sgx_deps.bzl",
+    "sgx_rules.bzl",
+])
+
+exports_files(
+    [
+        "asylo_copy_from_host.bzl",
+        "asylo_internal.bzl",
+        "asylo_transitions.bzl",
+    ],
+    visibility = ["//asylo/docs:__pkg__"],
+)
 
 # This tests that gtest can work inside an enclave.
 cc_enclave_test(
@@ -65,15 +79,17 @@ cc_library(
     testonly = 1,
     srcs = ["test_shim_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     visibility = ["//visibility:public"],
     deps = [
         ":test_shim_enclave_cc_proto",
         "//asylo/test/util:enclave_test_application",
         "//asylo/test/util:test_flags",
+        "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/flags:flag",
         "@com_google_googletest//:gtest",
     ],
+    alwayslink = 1,
 )
 
 # Used by the cc_enclave_test rule to execute gtest test suites inside enclaves.
@@ -87,7 +103,9 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":test_shim_enclave_cc_proto",
+        "//asylo:enclave_cc_proto",
         "//asylo:enclave_client",
+        "//asylo/platform/primitives/sgx:loader_cc_proto",
         "//asylo/test/util:test_flags",
         "//asylo/util:logging",
         "@com_google_absl//absl/flags:flag",

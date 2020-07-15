@@ -19,7 +19,7 @@
 #include <netdb.h>
 #include <stdlib.h>
 
-#include "asylo/platform/arch/include/trusted/host_calls.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 
 extern "C" {
 
@@ -31,9 +31,7 @@ int getaddrinfo(const char *node, const char *service,
   return enc_untrusted_getaddrinfo(node, service, hints, res);
 }
 
-void freeaddrinfo(struct addrinfo *res) {
-  return enc_untrusted_freeaddrinfo(res);
-}
+void freeaddrinfo(struct addrinfo *res) { enc_freeaddrinfo(res); }
 
 struct servent *getservbyname(const char *name, const char *proto) {
   abort();

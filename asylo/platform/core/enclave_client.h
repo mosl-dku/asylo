@@ -22,7 +22,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/memory/memory.h"
 #include "asylo/enclave.pb.h"  // IWYU pragma: export
-#include "asylo/platform/arch/fork.pb.h"
 #include "asylo/platform/core/shared_name.h"
 #include "asylo/util/status.h"  // IWYU pragma: export
 
@@ -53,18 +52,17 @@ class EnclaveClient {
   /// Returns the name of the enclave.
   ///
   /// \return The name of the enclave.
-  virtual const std::string &get_name() const { return name_; }
+  virtual absl::string_view get_name() const { return name_; }
 
  protected:
   /// Called by the EnclaveManager to create a client instance.
   ///
   /// \param name The enclave name as registered with the EnclaveManager.
-  explicit EnclaveClient(const std::string &name) : name_(name) {}
+  explicit EnclaveClient(absl::string_view name) : name_(name) {}
 
  private:
   friend class EnclaveManager;
   friend class EnclaveSignalDispatcher;
-  friend void donate(EnclaveClient *client);
 
   // Enters the enclave and invokes its initialization entry point.
   virtual Status EnterAndInitialize(const EnclaveConfig &config) = 0;
@@ -72,16 +70,15 @@ class EnclaveClient {
   // Enters the enclave and invokes its finalization entry point.
   virtual Status EnterAndFinalize(const EnclaveFinal &final_input) = 0;
 
-  // Donates the invoking thread to the enclave runtime.
-  virtual Status EnterAndDonateThread() = 0;
-
-  // Enters the enclave and invokes its signal handling entry point.
-  virtual Status EnterAndHandleSignal(const EnclaveSignal &signal) = 0;
-
   // Invoked by the EnclaveManager immediately before the enclave is
   // destroyed. This hook is provided to enable execution of custom logic by the
   // client at the time the enclave is destroyed.
   virtual Status DestroyEnclave() = 0;
+
+  /// Frees enclave resources registered to the client. Called after
+  /// EnclaveClient::DestroyEnclave from within
+  /// EnclaveManager::DestroyEnclave.
+  virtual void ReleaseMemory() {}
 
   std::string name_;
 };

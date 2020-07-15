@@ -14,12 +14,15 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
+licenses(["notice"])
 
 # BUILD file needed make template files available to instantiate.
 
 exports_files([
     "BUILD.tpl",
     "enclave_info.bzl.tpl",
+    "transitions.bzl.tpl",
     "WORKSPACE.tpl",
+    "empty.txt",
+    "true.c",
 ])

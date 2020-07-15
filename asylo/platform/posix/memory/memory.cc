@@ -24,6 +24,10 @@
 
 #include <cstddef>
 
+extern void set_malloc_hook(void*(*hook)(size_t, void *), void *);
+extern void set_realloc_hook(void*(*hook)(void *, size_t, void *), void *);
+extern void set_free_hook(void(*hook)(void *, void *), void *);
+
 namespace {
 
 // The next available address in the switched heap. It's set to the base address
@@ -72,7 +76,7 @@ void *ReallocHook(void *ptr, size_t size, void *pool) {
 
 // Free does nothing on the switched heap. User should take caution to avoid
 // mixing use of regular malloc/free with the switched malloc/heap.
-void FreeHook(void *address, void *pool) { return; }
+void FreeHook(void *address, void *pool) {}
 
 }  // namespace
 
@@ -91,8 +95,8 @@ void heap_switch(void *base, size_t size) {
   } else {
     switched_heap_next = nullptr;
     switched_heap_remaining = 0;
-    set_malloc_hook(/*malloc_hook=*/nullptr, /*pool=*/nullptr);
-    set_realloc_hook(/*realloc_hook=*/nullptr, /*pool=*/nullptr);
-    set_free_hook(/*free_hook=*/nullptr, /*pool=*/nullptr);
+    set_malloc_hook(/*hook=*/nullptr, /*pool=*/nullptr);
+    set_realloc_hook(/*hook=*/nullptr, /*pool=*/nullptr);
+    set_free_hook(/*hook=*/nullptr, /*pool=*/nullptr);
   }
 }

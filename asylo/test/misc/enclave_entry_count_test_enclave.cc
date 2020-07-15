@@ -21,7 +21,6 @@
 #include <atomic>
 
 #include "absl/synchronization/mutex.h"
-#include "asylo/platform/arch/include/trusted/host_calls.h"
 #include "asylo/platform/primitives/trusted_runtime.h"
 #include "asylo/test/misc/enclave_entry_count_test.pb.h"
 #include "asylo/test/util/enclave_test_application.h"
@@ -88,7 +87,7 @@ class EnclaveEntryCountTest : public EnclaveTestCase {
         }
       }
       // Counts the total active enclave entries saved by the enclave.
-      output->SetExtension(number_entries, get_active_enclave_entries());
+      output->SetExtension(number_entries, active_entry_count());
       count_finished = true;
     } else {
       return Status(error::GoogleError::INVALID_ARGUMENT,

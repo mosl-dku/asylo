@@ -19,17 +19,19 @@
 #ifndef ASYLO_IDENTITY_DELEGATING_IDENTITY_EXPECTATION_MATCHER_H_
 #define ASYLO_IDENTITY_DELEGATING_IDENTITY_EXPECTATION_MATCHER_H_
 
+#include <string>
+
 #include "asylo/identity/identity.pb.h"
 #include "asylo/identity/identity_expectation_matcher.h"
 #include "asylo/util/statusor.h"
 
 namespace asylo {
 
-// A DelegatingIdentityExpectationMatcher delegates its Match() calls to an
-// appropriate matcher from a program-wide static map of
+// A DelegatingIdentityExpectationMatcher delegates its MatchAndExplain() calls
+// to an appropriate matcher from a program-wide static map of
 // NamedIdentityExpectationMatchers.
 //
-// The Match() method makes sure that it is able to find a matcher
+// The MatchAndExplain() method makes sure that it is able to find a matcher
 // implementation capable of handling the |identity| and the |expectation|
 // parameters. If any of these matcher libraries are missing, it returns a
 // non-ok status, indicating that |identity| and/or |expectation| is not
@@ -38,17 +40,10 @@ namespace asylo {
 class DelegatingIdentityExpectationMatcher final
     : public IdentityExpectationMatcher {
  public:
-  DelegatingIdentityExpectationMatcher() = default;
-  ~DelegatingIdentityExpectationMatcher() override = default;
-  DelegatingIdentityExpectationMatcher(
-      const DelegatingIdentityExpectationMatcher &other) = default;
-  DelegatingIdentityExpectationMatcher(
-      DelegatingIdentityExpectationMatcher &&other) = default;
-
   // From the IdentityExpectationMatcher interface.
-  StatusOr<bool> Match(
-      const EnclaveIdentity &identity,
-      const EnclaveIdentityExpectation &expectation) const override;
+  StatusOr<bool> MatchAndExplain(const EnclaveIdentity &identity,
+                                 const EnclaveIdentityExpectation &expectation,
+                                 std::string *explanation) const override;
 };
 
 }  // namespace asylo

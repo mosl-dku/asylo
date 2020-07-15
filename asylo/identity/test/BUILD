@@ -16,6 +16,9 @@
 
 # Test utils for identity.
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
 licenses(["notice"])
 
 package(
@@ -26,6 +29,7 @@ package(
 cc_library(
     name = "mock_identity_expectation_matcher",
     hdrs = ["mock_identity_expectation_matcher.h"],
+    copts = ASYLO_DEFAULT_COPTS,
     deps = [
         "//asylo/identity:identity_cc_proto",
         "//asylo/identity:identity_expectation_matcher",

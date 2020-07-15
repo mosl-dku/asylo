@@ -28,9 +28,9 @@
 #include "absl/memory/memory.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "asylo/platform/primitives/parameter_stack.h"
 #include "asylo/platform/primitives/untrusted_primitives.h"
 #include "asylo/test/util/status_matchers.h"
+#include "asylo/util/status.h"
 #include "asylo/util/thread.h"
 
 using ::testing::_;
@@ -45,16 +45,17 @@ class MockedEnclaveClient : public Client {
  public:
   using MockExitHandlerCallback =
       MockFunction<Status(std::shared_ptr<class Client> enclave, void *,
-                          NativeParameterStack *params)>;
+                          MessageReader *in, MessageWriter *out)>;
 
-  MockedEnclaveClient() : Client(
-    /*name=*/"mock_enclave", absl::make_unique<DispatchTable>()) {}
+  MockedEnclaveClient()
+      : Client(
+            /*name=*/"mock_enclave", absl::make_unique<DispatchTable>()) {}
 
   // Virtual methods not used in this test.
   bool IsClosed() const override { return false; }
   Status Destroy() override { return Status::OkStatus(); }
-  Status EnclaveCallInternal(uint64_t selector,
-                             NativeParameterStack *params) override {
+  Status EnclaveCallInternal(uint64_t selector, MessageWriter *in,
+                             MessageReader *out) override {
     return Status::OkStatus();
   }
 };
@@ -82,9 +83,9 @@ TEST(DispatchTableTest, HandlersRegistration) {
 TEST(DispatchTableTest, HandlersInvocation) {
   const auto client = std::make_shared<MockedEnclaveClient>();
   MockedEnclaveClient::MockExitHandlerCallback callbacks[3];
-  EXPECT_CALL(callbacks[0], Call(Eq(client), _, _)).Times(2);
-  EXPECT_CALL(callbacks[1], Call(Eq(client), _, _)).Times(1);
-  EXPECT_CALL(callbacks[2], Call(Eq(client), _, _)).Times(0);
+  EXPECT_CALL(callbacks[0], Call(Eq(client), _, _, _)).Times(2);
+  EXPECT_CALL(callbacks[1], Call(Eq(client), _, _, _)).Times(1);
+  EXPECT_CALL(callbacks[2], Call(Eq(client), _, _, _)).Times(0);
   ASSERT_THAT(client->exit_call_provider()->RegisterExitHandler(
                   0, ExitHandler{callbacks[0].AsStdFunction()}),
               IsOk());
@@ -94,17 +95,17 @@ TEST(DispatchTableTest, HandlersInvocation) {
   ASSERT_THAT(client->exit_call_provider()->RegisterExitHandler(
                   20, ExitHandler{callbacks[2].AsStdFunction()}),
               IsOk());
-  NativeParameterStack params;
-  EXPECT_THAT(
-      client->exit_call_provider()->InvokeExitHandler(0, &params, client.get()),
-      IsOk());
-  EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(10, &params,
+  MessageWriter out;
+  EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(0, nullptr, &out,
                                                               client.get()),
               IsOk());
-  EXPECT_THAT(
-      client->exit_call_provider()->InvokeExitHandler(0, &params, client.get()),
-      IsOk());
-  EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(30, &params,
+  EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(10, nullptr, &out,
+                                                              client.get()),
+              IsOk());
+  EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(0, nullptr, &out,
+                                                              client.get()),
+              IsOk());
+  EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(30, nullptr, &out,
                                                               client.get()),
               StatusIs(error::GoogleError::OUT_OF_RANGE));
 }
@@ -115,7 +116,7 @@ TEST(DispatchTableTest, HandlersInMultipleThreads) {
   const auto client = std::make_shared<MockedEnclaveClient>();
   MockedEnclaveClient::MockExitHandlerCallback callbacks[kThreads];
   for (size_t i = 0; i < kThreads; ++i) {
-    EXPECT_CALL(callbacks[i], Call(Eq(client), _, _)).Times(kCount);
+    EXPECT_CALL(callbacks[i], Call(Eq(client), _, _, _)).Times(kCount);
   }
   std::vector<Thread> threads;
   threads.reserve(kThreads);
@@ -127,11 +128,11 @@ TEST(DispatchTableTest, HandlersInMultipleThreads) {
       ASSERT_THAT(client->exit_call_provider()->RegisterExitHandler(
                       i, ExitHandler{callbacks[i].AsStdFunction()}),
                   IsOk());
-      NativeParameterStack params;
       for (size_t c = 0; c < kCount; ++c) {
         absl::SleepFor(absl::Milliseconds(rand_gen(rand_engine)));
+        MessageWriter out;
         EXPECT_THAT(client->exit_call_provider()->InvokeExitHandler(
-                        i, &params, client.get()),
+                        i, nullptr, &out, client.get()),
                     IsOk());
       }
     });

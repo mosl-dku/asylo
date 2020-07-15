@@ -20,11 +20,12 @@
 #define ASYLO_PLATFORM_CRYPTO_GCMLIB_GCM_CRYPTOR_H_
 
 #include <openssl/evp.h>
+
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "absl/container/flat_hash_map.h"
 #include "absl/synchronization/mutex.h"
 #include "asylo/crypto/util/bytes.h"
 
@@ -90,9 +91,9 @@ class GcmCryptor {
   const size_t kBlockLength;
   const GcmCryptorKey kGcmKey;
   const GcmCryptorKey kCmacKey;
-  Token next_token_ GUARDED_BY(mu_);
+  Token next_token_ ABSL_GUARDED_BY(mu_);
   uint64_t key_id_counter_;
-  GcmCryptorKey next_derived_key_ GUARDED_BY(mu_);
+  GcmCryptorKey next_derived_key_ ABSL_GUARDED_BY(mu_);
   absl::Mutex mu_;
 
   GcmCryptor(const GcmCryptor &) = delete;
@@ -110,7 +111,7 @@ class GcmCryptorRegistry {
 
   // Accessor to the instance of GCM cryptor associated with a given key.
   GcmCryptor *GetGcmCryptor(size_t block_length, const GcmCryptorKey &key)
-      LOCKS_EXCLUDED(mu_);
+      ABSL_LOCKS_EXCLUDED(mu_);
 
   class SafeBytesHasher {
    public:
@@ -134,9 +135,14 @@ class GcmCryptorRegistry {
   GcmCryptorRegistry() = default;
   GcmCryptorRegistry(GcmCryptorRegistry const &) = delete;
   void operator=(GcmCryptorRegistry const &) = delete;
-  absl::flat_hash_map<GcmCryptorKey, std::unique_ptr<GcmCryptor>,
-                      SafeBytesHasher>
-      cryptor_registry_ GUARDED_BY(mu_);
+
+  // This class is expected to be used in context of trusted runtime in the
+  // primitives interface where system calls might not be available, so we use
+  // std::unordered_map instead of absl::flat_hash_map to prevent unsafe system
+  // calls made by absl based containers.
+  std::unordered_map<GcmCryptorKey, std::unique_ptr<GcmCryptor>,
+                     SafeBytesHasher>
+      cryptor_registry_ ABSL_GUARDED_BY(mu_);
   absl::Mutex mu_;
 };
 

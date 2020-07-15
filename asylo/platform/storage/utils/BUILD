@@ -14,27 +14,16 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
 # Utility libraries for IO operations.
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//asylo/bazel:asylo.bzl", "cc_enclave_test")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 
+licenses(["notice"])  # Apache v2.0
+
 package(
     default_visibility = ["//asylo:implementation"],
-)
-
-cc_library(
-    name = "trusted_utils",
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = select({
-        "@com_google_asylo//asylo": [
-            "offset_translator",
-            "fd_closer",
-        ],
-        "//conditions:default": [],
-    }),
 )
 
 cc_library(
@@ -72,6 +61,8 @@ cc_enclave_test(
     srcs = ["offset_translator_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        ":offset_translator",
+        "//asylo/util:logging",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -115,7 +106,6 @@ cc_test(
         ":test_utils",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
-        "//asylo/util:logging",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -132,7 +122,6 @@ cc_library(
         "//asylo/util:logging",
         "//asylo/util:status",
         "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/memory",
     ],
 )
 
@@ -149,7 +138,6 @@ cc_test(
         ":test_utils",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
-        "//asylo/util:logging",
         "@com_google_googletest//:gtest",
     ],
 )

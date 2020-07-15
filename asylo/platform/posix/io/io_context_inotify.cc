@@ -15,13 +15,13 @@
  * limitations under the License.
  *
  */
+#include "asylo/platform/posix/io/io_context_inotify.h"
+
 #include <sys/inotify.h>
 
-#include "asylo/platform/arch/include/trusted/host_calls.h"
-#include "asylo/platform/common/bridge_proto_serializer.h"
 #include "asylo/platform/common/memory.h"
-#include "asylo/platform/posix/io/io_context_inotify.h"
-#include "asylo/platform/primitives/util/trusted_memory.h"
+#include "asylo/platform/host_call/serializer_functions.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 
 namespace asylo {
 namespace io {
@@ -60,7 +60,9 @@ ssize_t IOContextInotify::Read(void *buf, size_t count) {
   char *buf_ptr = static_cast<char *>(buf);
   size_t num_bytes_written = TransferFromQueueToBuffer(buf_ptr, count);
   buf_ptr += num_bytes_written;
-  count -= num_bytes_written;  if (!event_queue_.empty() && (num_bytes_written == 0)) {
+  count -= num_bytes_written;
+  // Check if the buffer was too small.
+  if (!event_queue_.empty() && (num_bytes_written == 0)) {
     errno = EINVAL;
     return -1;
   } else if (!event_queue_.empty() || count == 0) {
@@ -69,16 +71,16 @@ ssize_t IOContextInotify::Read(void *buf, size_t count) {
   }
   // Read serialized events from the host, adjusting for space left in buffer.
   char *serialized_events = nullptr;
-  size_t len = 0;
-  if (enc_untrusted_inotify_read(host_fd_, count, &serialized_events, &len) <
-      0) {
+  size_t serialized_events_len = 0;
+  if (enc_untrusted_inotify_read(host_fd_, count, &serialized_events,
+                                 &serialized_events_len) < 0) {
     // errno is set by enc_untrusted_inotify_read.
     return -1;
   }
-  asylo::UntrustedUniquePtr<char> serialized_events_ptr(serialized_events);
+  asylo::MallocUniquePtr<char> serialized_events_ptr(serialized_events);
   // Extract events back into the queue.
-  std::string serialized_events_str(serialized_events, len);
-  if (!asylo::DeserializeInotifyEvents(serialized_events_str, &event_queue_)) {
+  if (!asylo::host_call::DeserializeInotifyEvents(
+          serialized_events, serialized_events_len, &event_queue_)) {
     errno = EBADE;
     return -1;
   }

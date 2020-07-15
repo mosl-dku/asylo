@@ -14,13 +14,14 @@
 # limitations under the License.
 #
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
 licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = ["//asylo:implementation"],
 )
-
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 
 # Utility functions for translating time values and units.
 cc_library(
@@ -69,7 +70,6 @@ cc_library(
     deps = [
         "//asylo/util:logging",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/synchronization",
     ],
 )
@@ -99,58 +99,6 @@ cc_test(
     ],
 )
 
-# Shared types across bridge boundaries.
-cc_library(
-    name = "bridge_types",
-    srcs = ["bridge_functions.cc"],
-    hdrs = [
-        "bridge_functions.h",
-        "bridge_types.h",
-    ],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        "//asylo/util:logging",
-        "@com_google_absl//absl/base:core_headers",
-    ],
-)
-
-# Tests for the bridge functions
-cc_test(
-    name = "bridge_functions_test",
-    srcs = ["bridge_functions_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":bridge_types",
-        "//asylo/test/util:finite_domain_fuzz",
-        "//asylo/test/util:test_main",
-        "@com_google_googletest//:gtest",
-    ],
-)
-
-# Types for arguments to be serialized and passed across the enclave boundary.
-proto_library(
-    name = "bridge_types_proto",
-    srcs = ["bridge_proto_types.proto"],
-)
-
-cc_proto_library(
-    name = "bridge_types_cc_proto",
-    deps = [":bridge_types_proto"],
-)
-
-# Shared proto serializer and deserializer across bridge boundaries.
-cc_library(
-    name = "bridge_proto_serializer",
-    srcs = ["bridge_proto_serializer.cc"],
-    hdrs = ["bridge_proto_serializer.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":bridge_types",
-        ":bridge_types_cc_proto",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
 # Synchronized bounded queue type.
 cc_library(
     name = "ring_buffer",
@@ -169,23 +117,6 @@ cc_test(
     ],
 )
 
-cc_library(
-    name = "spin_lock",
-    hdrs = ["spin_lock.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-)
-
-cc_test(
-    name = "spin_lock_test",
-    srcs = ["spin_lock_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":spin_lock",
-        "//asylo/test/util:test_main",
-        "@com_google_googletest//:gtest",
-    ],
-)
-
 # Provide a unique pointer for malloc'd memory.
 cc_library(
     name = "memory",
@@ -199,27 +130,21 @@ cc_library(
     srcs = ["futex.cc"],
     hdrs = ["futex.h"],
     copts = ASYLO_DEFAULT_COPTS,
-)
-
-# Utility functions for creating debug report strings.
-cc_library(
-    name = "debug_strings",
-    srcs = ["debug_strings.cc"],
-    hdrs = ["debug_strings.h"],
-    copts = ASYLO_DEFAULT_COPTS,
     deps = [
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
+        ":time_util",
     ],
 )
 
-cc_test(
-    name = "debug_strings_test",
-    srcs = ["debug_strings_test.cc"],
+# Provide the current state of the enclave.
+cc_library(
+    name = "enclave_state",
+    srcs = ["enclave_state.cc"],
+    hdrs = ["enclave_state.h"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
-        ":debug_strings",
-        "//asylo/test/util:test_main",
-        "@com_google_googletest//:gtest",
+        "//asylo/platform/core:trusted_spin_lock",
+        "//asylo/util:lock_guard",
+        "//asylo/util:status",
+        "@com_google_absl//absl/strings",
     ],
 )

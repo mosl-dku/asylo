@@ -14,9 +14,10 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = [
@@ -32,9 +33,8 @@ cc_library(
     ],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/core:trusted_core",
         "//asylo/platform/posix:pthread_impl",
-        "@com_google_absl//absl/container:flat_hash_map",
+        "//asylo/platform/primitives:trusted_primitives",
+        "//asylo/platform/primitives:trusted_runtime",
     ],
 )

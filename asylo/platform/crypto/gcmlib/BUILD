@@ -14,12 +14,13 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
 # GCM library for secure storage.
 
-load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKENDS", "cc_enclave_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKEND_TAGS", "cc_enclave_test")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = ["//asylo:implementation"],
@@ -29,7 +30,7 @@ cc_library(
     name = "trusted_gcmlib",
     copts = ASYLO_DEFAULT_COPTS,
     deps = select({
-        "@com_google_asylo//asylo": ["gcm_cryptor"],
+        "@com_google_asylo//asylo": [":gcm_cryptor"],
         "//conditions:default": [],
     }),
 )
@@ -39,14 +40,13 @@ cc_library(
     srcs = ["gcm_cryptor.cc"],
     hdrs = ["gcm_cryptor.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/crypto/util:bytes",
         "//asylo/util:logging",
         "@boringssl//:crypto",
-        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/synchronization",
     ],
@@ -58,6 +58,10 @@ cc_enclave_test(
     srcs = ["gcm_cryptor_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        ":gcm_cryptor",
+        "//asylo/crypto/util:bytes",
+        "//asylo/util:logging",
+        "@boringssl//:crypto",
         "@com_google_googletest//:gtest",
     ],
 )

@@ -21,11 +21,11 @@
 #include <memory>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
 #include "asylo/crypto/random_nonce_generator.h"
 #include "asylo/util/status_macros.h"
 
 namespace asylo {
-namespace experimental {
 namespace {
 
 // The following constants determine the maximum number of messages that can be
@@ -136,5 +136,4 @@ AeadCryptor::AeadCryptor(
       nonce_generator_(std::move(nonce_generator)),
       number_of_sealed_messages_(0) {}
 
-}  // namespace experimental
 }  // namespace asylo

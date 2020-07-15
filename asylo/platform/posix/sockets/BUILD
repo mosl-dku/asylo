@@ -14,18 +14,21 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
 # Socket implementation, tests, and perf measurement tools.
 
-load("@linux_sgx//:sgx_sdk.bzl", "sgx_enclave")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "//asylo/bazel:asylo.bzl",
-    "ASYLO_ALL_BACKENDS",
+    "ASYLO_ALL_BACKEND_TAGS",
     "cc_test",
-    "sgx_enclave_test",
+    "cc_unsigned_enclave",
+    "debug_sign_enclave",
+    "enclave_test",
 )
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])
 
 package(
     default_visibility = ["//asylo:implementation"],
@@ -36,17 +39,36 @@ cc_library(
     name = "sockets",
     srcs = [
         "in.cc",
-        "inet.cc",
-        "netdb.cc",
         "socket.cc",
     ],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
-        "//asylo/platform/arch:trusted_arch",
+        ":backend_agnostic_sockets",
         "//asylo/platform/common:memory",
         "//asylo/platform/posix/io:io_manager",
     ],
+    alwayslink = 1,
+)
+
+# Contains backend independent implementations of sockets. This is required to
+# distinguish backend dependent (unmigrated) and backend independent (migrated)
+# cc files in sockets library. This library can be used for providing backend
+# agnostic posix implementations for backends requiring one, or by higher level
+# libraries like backend_agnostic_posix. This is expected to be removed if/when
+# sockets cc_library does not rely on backend dependent trusted_arch anymore.
+cc_library(
+    name = "backend_agnostic_sockets",
+    srcs = [
+        "inet.cc",
+        "netdb.cc",
+    ],
+    copts = ASYLO_DEFAULT_COPTS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
+    deps = [
+        "//asylo/platform/host_call",
+    ],
+    alwayslink = 1,
 )
 
 # Contains socket communication class for data transmission.
@@ -55,10 +77,9 @@ cc_library(
     srcs = ["socket_transmit.cc"],
     hdrs = ["socket_transmit.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         "//asylo/util:logging",
-        "//asylo/platform/arch:trusted_arch",
         "//asylo/util:status",
     ] + select({
         "@com_google_asylo//asylo": [
@@ -74,11 +95,10 @@ cc_library(
     srcs = ["socket_server.cc"],
     hdrs = ["socket_server.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         ":socket_transmit",
         "//asylo/util:logging",
-        "//asylo/platform/arch:trusted_arch",
         "//asylo/platform/storage/utils:fd_closer",
         "//asylo/util:status",
     ] + select({
@@ -95,11 +115,10 @@ cc_library(
     srcs = ["socket_client.cc"],
     hdrs = ["socket_client.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         ":socket_transmit",
         "//asylo/util:logging",
-        "//asylo/platform/arch:trusted_arch",
         "//asylo/platform/storage/utils:fd_closer",
         "//asylo/util:status",
     ] + select({
@@ -120,6 +139,7 @@ cc_library(
         ":socket_client",
         ":socket_server",
         "//asylo/util:status",
+        "@com_google_absl//absl/base:core_headers",
     ],
 )
 
@@ -136,8 +156,8 @@ cc_proto_library(
 )
 
 # Enclave for UNIX domain-socket test.
-sgx_enclave(
-    name = "domain_socket_test_enclave.so",
+cc_unsigned_enclave(
+    name = "domain_socket_test_enclave_unsigned.so",
     srcs = ["domain_socket_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
@@ -150,8 +170,13 @@ sgx_enclave(
     ],
 )
 
+debug_sign_enclave(
+    name = "domain_socket_test_enclave.so",
+    unsigned = "domain_socket_test_enclave_unsigned.so",
+)
+
 # Driver for UNIX domain-socket test.
-sgx_enclave_test(
+enclave_test(
     name = "domain_socket_test",
     size = "small",
     srcs = ["domain_socket_test_driver.cc"],
@@ -164,7 +189,6 @@ sgx_enclave_test(
         ":socket_test_cc_proto",
         ":socket_test_transmit",
         "//asylo:enclave_client",
-        "//asylo/platform/arch:trusted_arch",
         "//asylo/test/util:enclave_test",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_flags",
@@ -177,8 +201,8 @@ sgx_enclave_test(
 )
 
 # Enclave for INET6 socket test.
-sgx_enclave(
-    name = "inet6_socket_test_enclave.so",
+cc_unsigned_enclave(
+    name = "inet6_socket_test_enclave_unsigned.so",
     srcs = ["inet6_socket_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
@@ -191,8 +215,13 @@ sgx_enclave(
     ],
 )
 
+debug_sign_enclave(
+    name = "inet6_socket_test_enclave.so",
+    unsigned = "inet6_socket_test_enclave_unsigned.so",
+)
+
 # Driver for INET6 socket test.
-sgx_enclave_test(
+enclave_test(
     name = "inet6_socket_test",
     srcs = ["inet6_socket_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -204,7 +233,6 @@ sgx_enclave_test(
         ":socket_test_cc_proto",
         ":socket_test_transmit",
         "//asylo:enclave_client",
-        "//asylo/platform/arch:trusted_arch",
         "//asylo/test/util:enclave_test",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
@@ -213,8 +241,8 @@ sgx_enclave_test(
 )
 
 # Enclave for getaddrinfo and freeaddrinfo tests.
-sgx_enclave(
-    name = "addrinfo_test_enclave.so",
+cc_unsigned_enclave(
+    name = "addrinfo_test_enclave_unsigned.so",
     srcs = ["addrinfo_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
@@ -223,8 +251,13 @@ sgx_enclave(
     ],
 )
 
+debug_sign_enclave(
+    name = "addrinfo_test_enclave.so",
+    unsigned = "addrinfo_test_enclave_unsigned.so",
+)
+
 # Driver for getaddrinfo and freeaddrinfo tests.
-sgx_enclave_test(
+enclave_test(
     name = "addrinfo_test",
     srcs = ["addrinfo_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,

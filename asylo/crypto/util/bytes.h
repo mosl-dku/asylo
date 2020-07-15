@@ -246,6 +246,14 @@ class Bytes {
     }
   }
 
+  // Determine whether the data held by this object equals the data pointed to
+  // a byte container view. The method performs a side-channel-safe comparison
+  // if the Policy parameter is set to DataSafety::SAFE, otherwise it uses
+  // memcmp for fast comparison.
+  bool Equals(ByteContainerView other) const {
+    return Equals(other.data(), other.size());
+  }
+
   // The resize method is included to provide API compatibility with other
   // byte-container classes such as string and std::vector<uint8_t>.
   // It does not modify the object. Callers writing templated code that
@@ -262,9 +270,16 @@ class Bytes {
   // The default constructor is defaulted so that Bytes is a trivial class.
   Bytes() = default;
 
-  // Instantiates a new object and copy the input data. If the input data is
-  // larger than the value of the Size template parameter on the class, then
-  // only Size bytes are copied.
+  // Instantiates a new object and copies the input |data|. The size of |data|
+  // must be the same as the |Size| template parameter.
+  explicit Bytes(const uint8_t (&data)[Size]) {
+    PerformStaticChecks();
+    assign(data, Size);
+  }
+
+  // Instantiates a new object and copies the input |data|. If |size| is
+  // larger than the value of the |Size| template parameter on the class, then
+  // only |Size| bytes are copied.
   Bytes(const uint8_t *data, size_t size) {
     PerformStaticChecks();
     assign(data, size);
@@ -319,14 +334,16 @@ class SafeBytes final : public Bytes<Size, SafePolicy, SafeBytes<Size>> {
 
   SafeBytes() = default;
 
-  // The following template constructor just forwards all its arguments to the
-  // constructor of the base type. This template construct is safe because none
-  // of the constructors of the base type are marked explicit. As a result,
-  // there is no possibility of this constructor exposing an explicit
-  // constructor of the base class through this implicit constructor.
-  template <typename... Args>
-  SafeBytes(Args &&... args)
-      : base_type(std::forward<Args>(args)...) {}
+  // The following template constructor requires at least one argument
+  // since the 0 argument case is covered by the default constructor. It
+  // forwards all its arguments to the constructor of the base type. This
+  // template construct is safe because none of the constructors of the base
+  // type are marked explicit. As a result, there is no possibility of this
+  // constructor exposing an explicit constructor of the base class through this
+  // implicit constructor.
+  template <typename Arg, typename... Args>
+  SafeBytes(Arg &&arg, Args &&... args)
+      : base_type(std::forward<Arg>(arg), std::forward<Args>(args)...) {}
 
   // The equality operator. Performs a side-channel-resistant comparison of
   // |other| with this object.
@@ -371,14 +388,16 @@ class UnsafeBytes final : public Bytes<Size, UnsafePolicy, UnsafeBytes<Size>> {
   UnsafeBytes &operator=(UnsafeBytes &&) = default;
   ~UnsafeBytes() = default;
 
-  // The following template constructor just forwards all its arguments to the
-  // constructor of the base type. This template construct is safe because none
-  // of the constructors of the base type are marked explicit. As a result,
-  // there is no possibility of this constructor exposing an explicit
-  // constructor of the base class through this implicit constructor.
-  template <typename... Args>
-  UnsafeBytes(Args &&... args)
-      : base_type(std::forward<Args>(args)...) {}
+  // The following template constructor requires at least one argument
+  // since the 0 argument case is covered by the default constructor. It just
+  // forwards all its arguments to the constructor of the base type. This
+  // template construct is safe because none of the constructors of the base
+  // type are marked explicit. As a result, there is no possibility of this
+  // constructor exposing an explicit constructor of the base class through this
+  // implicit constructor.
+  template <typename Arg, typename... Args>
+  UnsafeBytes(Arg &&arg, Args &&... args)
+      : base_type(std::forward<Arg>(arg), std::forward<Args>(args)...) {}
 
   // The equality operator. Since the UnsafeBytes class uses UnsafePolicy to
   // configure its Bytes base class, the Equals method, when invoked on an

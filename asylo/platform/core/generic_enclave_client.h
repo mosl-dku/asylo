@@ -29,10 +29,18 @@ namespace asylo {
 // Default implementation of EnclaveClient.
 class GenericEnclaveClient : public EnclaveClient {
  public:
+  static std::unique_ptr<GenericEnclaveClient> Create(
+      const absl::string_view name,
+      const std::shared_ptr<primitives::Client> primitive_client);
+
   Status EnterAndRun(const EnclaveInput &input, EnclaveOutput *output) override;
 
+  std::shared_ptr<primitives::Client> GetPrimitiveClient() const {
+    return primitive_client_;
+  }
+
  protected:
-  explicit GenericEnclaveClient(const std::string &name)
+  explicit GenericEnclaveClient(absl::string_view name)
       : EnclaveClient(name) {}
 
   // Primitive enclave client. Populated by the implementation of EnclaveLoader.
@@ -41,7 +49,6 @@ class GenericEnclaveClient : public EnclaveClient {
  private:
   Status EnterAndInitialize(const EnclaveConfig &config) override;
   Status EnterAndFinalize(const EnclaveFinal &final_input) override;
-  Status EnterAndDonateThread() override;
   Status DestroyEnclave() override;
 
   // Enters the enclave and invokes the initialization entry-point. If the ecall
@@ -68,6 +75,8 @@ class GenericEnclaveClient : public EnclaveClient {
   // that contains output from the enclave.
   Status Finalize(const char *input, size_t input_len,
                   std::unique_ptr<char[]> *output, size_t *output_len);
+
+  void ReleaseMemory() override { primitive_client_->ReleaseMemory(); }
 };
 
 }  // namespace asylo

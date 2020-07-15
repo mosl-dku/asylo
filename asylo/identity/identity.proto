@@ -21,6 +21,8 @@ syntax = "proto2";
 // $location: https://asylo.dev/docs/reference/proto/identity/asylo.identity.v1.html
 // $front_matter: redirect_from: /docs/reference/proto/identity/identity.html
 
+// This package defines the core building blocks of identity, identity
+// expectations, and assertions of identity.
 package asylo;
 
 // A categorization class of identity.
@@ -64,6 +66,11 @@ message EnclaveIdentity {
   // Bytes containing the identity. The interpretation of these bytes is up to
   // the authorization authority that handles identities matching `description`.
   optional bytes identity = 2;
+
+  // The version of the `EnclaveIdentity`. This field can be used as a means of
+  // distinguishing between different `identity` serializations, even when the
+  // underlying identity `description` is identical.
+  optional string version = 3;
 }
 
 // A collection of enclave identities held by an entity.

@@ -14,15 +14,18 @@
 # limitations under the License.
 #
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+
+# Used to selectively enable gtest tests to run inside an enclave.
+load("//asylo/bazel:asylo.bzl", "cc_test")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
 licenses(["notice"])  # Apache v2.0
 
 # Description:
 #   This package provides an implementation of gRPC security components for the
 #   enclave gRPC security stack.
-
-# Used to selectively enable gtest tests to run inside an enclave.
-load("//asylo/bazel:asylo.bzl", "cc_test")
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 
 package(default_visibility = [
     "//asylo/grpc/auth:__subpackages__",
@@ -45,16 +48,18 @@ cc_library(
     ],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
-        ":assertion_description",
         ":client_ekep_handshaker",
         ":ekep_handshaker",
         ":ekep_handshaker_util",
-        ":enclave_credentials_options",
         ":handshake_cc_proto",
         ":server_ekep_handshaker",
-        "//asylo/grpc/auth/util:safe_string",
+        "//asylo/grpc/auth:enclave_credentials_options",
+        "//asylo/identity:identity_acl_cc_proto",
+        "//asylo/identity:identity_acl_evaluator",
         "//asylo/identity:identity_cc_proto",
+        "//asylo/identity:identity_expectation_matcher",
         "//asylo/util:cleansing_types",
+        "//asylo/util:logging",
         "//asylo/util:status",
         "@com_github_grpc_grpc//:alts_frame_protector",
         "@com_github_grpc_grpc//:gpr_base",
@@ -63,44 +68,10 @@ cc_library(
         "@com_github_grpc_grpc//:ref_counted_ptr",
         "@com_github_grpc_grpc//:tsi_interface",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf_lite",
-    ],
-)
-
-# Channel and server credentials options.
-cc_library(
-    name = "enclave_credentials_options",
-    srcs = ["enclave_credentials_options.cc"],
-    hdrs = ["enclave_credentials_options.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":assertion_description",
-        "//asylo/grpc/auth/util:safe_string",
-    ],
-)
-
-# Defines a C structure analogous to the AssertionDescription proto.
-cc_library(
-    name = "assertion_description",
-    srcs = ["assertion_description.cc"],
-    hdrs = ["assertion_description.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        "//asylo/grpc/auth/util:safe_string",
-        "@com_github_grpc_grpc//:gpr_base",
-    ],
-)
-
-cc_test(
-    name = "assertion_description_test",
-    srcs = ["assertion_description_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    enclave_test_name = "assertion_description_enclave_test",
-    deps = [
-        ":assertion_description",
-        "//asylo/identity:identity_cc_proto",
-        "//asylo/test/util:test_main",
-        "@com_google_googletest//:gtest",
     ],
 )
 
@@ -160,10 +131,12 @@ cc_library(
     deps = [
         ":ekep_error_space",
         ":handshake_cc_proto",
+        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/util:cleansing_types",
         "//asylo/util:logging",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
         "@boringssl//:crypto",
         "@com_google_absl//absl/strings",
@@ -180,6 +153,7 @@ cc_test(
         ":ekep_crypto",
         ":ekep_error_space",
         ":handshake_cc_proto",
+        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bytes",
         "//asylo/crypto/util:trivial_object_util",
         "//asylo/test/util:status_matchers",
@@ -201,14 +175,14 @@ cc_library(
         ":handshake_cc_proto",
         ":transcript",
         "//asylo/crypto:hash_interface",
+        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/grpc/auth/util:multi_buffer_input_stream",
         "//asylo/identity:identity_cc_proto",
-        "//asylo/identity/null_identity:null_assertion_generator",
-        "//asylo/identity/null_identity:null_assertion_verifier",
         "//asylo/util:cleansing_types",
         "//asylo/util:logging",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -234,6 +208,7 @@ cc_library(
         "//asylo/identity:identity_cc_proto",
         "//asylo/util:cleansing_types",
         "//asylo/util:logging",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
         "@boringssl//:crypto",
         "@com_google_absl//absl/memory",
@@ -258,6 +233,7 @@ cc_library(
         "//asylo/identity:identity_cc_proto",
         "//asylo/util:cleansing_types",
         "//asylo/util:logging",
+        "//asylo/util:proto_enum_util",
         "//asylo/util:status",
         "@boringssl//:crypto",
         "@com_google_absl//absl/memory",
@@ -275,11 +251,12 @@ cc_library(
     deps = [
         ":ekep_handshaker",
         "//asylo/identity:enclave_assertion_authority",
-        "//asylo/identity:enclave_assertion_generator",
-        "//asylo/identity:enclave_assertion_verifier",
         "//asylo/identity:identity_cc_proto",
+        "//asylo/identity/attestation:enclave_assertion_generator",
+        "//asylo/identity/attestation:enclave_assertion_verifier",
         "//asylo/util:status",
         "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -292,8 +269,11 @@ cc_test(
     deps = [
         ":ekep_handshaker",
         ":ekep_handshaker_util",
+        "//asylo/identity:descriptions",
         "//asylo/identity:identity_cc_proto",
-        "//asylo/identity/null_identity:null_identity_util",
+        "//asylo/identity/attestation/null:null_assertion_generator",
+        "//asylo/identity/attestation/null:null_assertion_verifier",
+        "//asylo/identity/attestation/null:null_identity_util",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "@com_google_googletest//:gtest",

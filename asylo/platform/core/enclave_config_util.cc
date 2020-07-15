@@ -19,6 +19,7 @@
 #include "asylo/platform/core/enclave_config_util.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 
 #include "asylo/util/logging.h"
@@ -33,7 +34,11 @@ void SetDefaultHostName(EnclaveConfig *config) {
   if (config->has_host_name()) return;
 
   // Set the field to this host name.
-  char buf[1024];
+#ifdef HOST_NAME_MAX
+  char buf[HOST_NAME_MAX + 1];
+#else
+  char buf[256];
+#endif
   if (gethostname(buf, sizeof(buf)) != 0) {
     LOG(ERROR) << "gethostname on host failed:" << strerror(errno);
     return;
@@ -58,29 +63,28 @@ void SetDefaultCurrentWorkingDirectory(EnclaveConfig *config) {
   config->set_current_working_directory(buf);
 }
 
-// Sets uninitialized fields in the HostConfig of |config| to values from
-// |host_config|, if those are set.
-void SetHostConfig(const HostConfig &host_config, EnclaveConfig *config) {
-  HostConfig *mutable_host_config = config->mutable_host_config();
-  if (!mutable_host_config->has_local_attestation_domain() &&
-      host_config.has_local_attestation_domain()) {
-    mutable_host_config->set_local_attestation_domain(
-        host_config.local_attestation_domain());
-  }
-}
-
 }  // namespace
 
-void SetEnclaveConfigDefaults(const HostConfig &host_config,
+void SetEnclaveConfigDefaults(const HostConfig &/*host_config*/,
                               EnclaveConfig *config) {
   SetDefaultHostName(config);
   SetDefaultCurrentWorkingDirectory(config);
-  SetHostConfig(host_config, config);
+}
+
+void SetEnclaveConfigDefaults(EnclaveConfig *config) {
+  SetDefaultHostName(config);
+  SetDefaultCurrentWorkingDirectory(config);
 }
 
 EnclaveConfig CreateDefaultEnclaveConfig(const HostConfig &host_config) {
   EnclaveConfig config;
   SetEnclaveConfigDefaults(host_config, &config);
+  return config;
+}
+
+EnclaveConfig CreateDefaultEnclaveConfig() {
+  EnclaveConfig config;
+  SetEnclaveConfigDefaults(&config);
   return config;
 }
 

@@ -14,17 +14,19 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
-# Enclave test cases.
-
-load("@linux_sgx//:sgx_sdk.bzl", "sgx_enclave", "sgx_enclave_configuration")
+load("@linux_sgx//:sgx_sdk.bzl", "sgx")
+load("@rules_cc//cc:defs.bzl", "cc_proto_library", "cc_test")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "//asylo/bazel:asylo.bzl",
     "cc_enclave_test",
-    "sgx_enclave_test",
+    "cc_unsigned_enclave",
+    "debug_sign_enclave",
+    "enclave_test",
 )
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])
 
 proto_library(
     name = "proto_test_proto",
@@ -43,6 +45,10 @@ cc_enclave_test(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         "//asylo/platform/posix/io:io_manager",
+        "//asylo/platform/storage/utils:fd_closer",
+        "//asylo/test/util:status_matchers",
+        "//asylo/util:logging",
+        "//asylo/util:status",
         "@boringssl//:crypto",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -50,19 +56,25 @@ cc_enclave_test(
     ],
 )
 
-sgx_enclave(
-    name = "test_proto.so",
+cc_unsigned_enclave(
+    name = "test_proto_unsigned.so",
     srcs = ["proto_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":proto_test_cc_proto",
         "//asylo/platform/posix/io:io_manager",
         "//asylo/test/util:enclave_test_application",
+        "//asylo/util:logging",
         "@com_google_absl//absl/memory",
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "test_proto.so",
+    unsigned = "test_proto_unsigned.so",
+)
+
+enclave_test(
     name = "proto_test",
     srcs = ["proto_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -78,19 +90,25 @@ sgx_enclave_test(
     ],
 )
 
-sgx_enclave(
-    name = "getenv_test_enclave.so",
+cc_unsigned_enclave(
+    name = "getenv_test_enclave_unsigned.so",
     srcs = ["getenv_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":proto_test_cc_proto",
-        "//asylo:enclave_cc_proto",
         "//asylo/test/util:enclave_test_application",
+        "//asylo/util:logging",
+        "//asylo/util:status_macros",
         "@com_google_absl//absl/strings",
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "getenv_test_enclave.so",
+    unsigned = "getenv_test_enclave_unsigned.so",
+)
+
+enclave_test(
     name = "getenv_test",
     srcs = ["getenv_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -107,19 +125,25 @@ sgx_enclave_test(
     ],
 )
 
-sgx_enclave(
-    name = "enclave_api_test_proto.so",
+cc_unsigned_enclave(
+    name = "enclave_api_test_proto_unsigned.so",
     srcs = ["enclave_api_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":proto_test_cc_proto",
         "//asylo/platform/posix/io:io_manager",
         "//asylo/test/util:enclave_test_application",
+        "//asylo/util:logging",
         "@com_google_absl//absl/memory",
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "enclave_api_test_proto.so",
+    unsigned = "enclave_api_test_proto_unsigned.so",
+)
+
+enclave_test(
     name = "enclave_api_test",
     srcs = ["enclave_api_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -147,7 +171,7 @@ cc_test(
     ],
 )
 
-sgx_enclave_configuration(
+sgx.enclave_configuration(
     name = "many_threads_enclave_config",
     tcs_num = "1000",
 )
@@ -155,12 +179,12 @@ sgx_enclave_configuration(
 cc_enclave_test(
     name = "lock_test",
     srcs = ["lock_test.cc"],
+    backends = sgx.backend_labels,
     copts = ASYLO_DEFAULT_COPTS,
     enclave_config = ":many_threads_enclave_config",
     deps = [
         "//asylo/platform/core:trusted_mutex",
         "//asylo/platform/core:trusted_spin_lock",
-        "//asylo/platform/core:untrusted_mutex",
         "@com_google_googletest//:gtest",
     ],
 )

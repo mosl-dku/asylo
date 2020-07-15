@@ -60,6 +60,14 @@ import re
 import sys
 
 
+class ParseError(Exception):
+  pass
+
+
+class UserError(Exception):
+  pass
+
+
 class SystemCallTable(object):
   """A collection of Linux system call descriptions."""
 
@@ -78,7 +86,8 @@ class SystemCallTable(object):
     # declared by that system call.
     self.parameter_list = {}
 
-    # A list of (system call, parameter_name, tag, value) annotations.
+    # A list of (system call, parameter_name, parameter_type, tag, value)
+    # annotations.
     self.annotation_list = []
 
     # A dictionary mapping a (system_call, parameter) pair to a convention.
@@ -111,7 +120,7 @@ class SystemCallTable(object):
       # offsets into the list. Check here that its length is odd as a sanity
       # check.
       if len(split) % 2 != 1:
-        raise 'Could not parse definition: ' + definition
+        raise ParseError('Could not parse definition: ' + definition)
 
       name = split[0]
       self.parameter_count[name] = arity
@@ -120,16 +129,13 @@ class SystemCallTable(object):
   def parse_parameters(self):
     """Parse each entry in the parameter_list array."""
 
-    parameter_declarations = []
     for syscall, parameters in self.parameter_list.items():
       for i in range(0, len(parameters) - 1, 2):
         parameter_type = parameters[i].strip()
         parameter_name = parameters[i + 1].strip()
 
-        # The Linux kernel defines a macro __user to mark a type as referring to
-        # user-controlled data. Rather than define a similar macro, remove this
-        # in the preprocessor.
-        parameter_type = re.sub('__user', '', parameter_type)
+        if parameter_type.find('__user') != -1:
+          raise UserError('Type includes __user marker: ' + parameter_type)
 
         # Translate kernel types which are not directly available in user space.
         parameter_type = re.sub('umode_t', 'unsigned short', parameter_type)
@@ -137,7 +143,7 @@ class SystemCallTable(object):
         parameter_type = re.sub('u64', 'uint64_t', parameter_type)
 
         # Match and remove parameter conventions.
-        pattern = r'(\\in)|(\\out)|(\\in_out)'
+        pattern = r'(\\in_out)|(\\in)|(\\out)'
         conventions = re.findall(pattern, parameter_type)
         parameter_type = re.sub(pattern, '', parameter_type)
         for convention in conventions:
@@ -148,13 +154,8 @@ class SystemCallTable(object):
         annotations = re.findall(pattern, parameter_type)
         parameter_type = re.sub(pattern, '', parameter_type)
         for annotation in annotations:
-          self.annotation_list.append((syscall, parameter_name, annotation[0],
-                                       annotation[1]))
-
-        # Collect a DECLARE_PARAMETER invocation.
-        parameter_declarations.append(
-            '  DECLARE_PARAMETER({}, {}, {}, {})'.format(
-                syscall, i / 2, parameter_name, parameter_type))
+          self.annotation_list.append((syscall, parameter_name, parameter_type,
+                                       annotation[0], annotation[1]))
 
         self.parameter_table[(syscall, i / 2)] = (parameter_name,
                                                   parameter_type)
@@ -165,17 +166,26 @@ class SystemCallTable(object):
       print('#include <{}>'.format(include))
 
   def write_annotations(self):
-    """Emits a list of initializers the parsed parameter annotations."""
+    """Emits a list of initializers from the parsed parameter annotations."""
 
     bounds = []
     counts = []
-    for syscall, parameter, annotation, value in self.annotation_list:
-      key = '{{"{}", "{}"}}'.format(syscall, parameter)
-      if annotation == 'bound':
-        index = self.parameter_list[syscall].index(value) / 2
-        bounds.append('{{{}, {}}}'.format(key, index))
-      if annotation == 'count':
-        counts.append('{{{}, {}}}'.format(key, value))
+    lengths = []
+    for syscall, param_name, param_type, annotation_name, annotation_value in \
+        self.annotation_list:
+      key = '{{"{}", "{}"}}'.format(syscall, param_name)
+      if annotation_name == 'bound':
+        bind_param_index = self.parameter_list[syscall].index(
+            annotation_value) / 2
+        bounds.append('{{{}, {}}}'.format(key, bind_param_index))
+      if annotation_name == 'count':
+        counts.append('{{{}, {}}}'.format(key, annotation_value))
+      if annotation_name == 'length':
+        bind_param_index = self.parameter_list[syscall].index(
+            annotation_value) / 2
+        element_size = 'sizeof({})'.format(param_type.strip('* '))
+        index_and_size = '{{{}, {}}}'.format(bind_param_index, element_size)
+        lengths.append('{{{}, {}}}'.format(key, index_and_size))
 
     # Write the accumulated annotation tables.
     print('#define PARAMETER_BOUNDS_INIT \\\n  ', end='')
@@ -183,6 +193,9 @@ class SystemCallTable(object):
     print()
     print('#define PARAMETER_COUNTS_INIT \\\n  ', end='')
     print(', \\\n  '.join(counts))
+    print()
+    print('#define PARAMETER_LENGTHS_INIT \\\n', end='')
+    print(', \\\n  '.join(lengths))
 
   def write_conventions(self):
     """"Emits a table of parameter conventions."""
@@ -234,10 +247,14 @@ class SystemCallTable(object):
         encoding_size = 'EncodingSize<{}>("{}", "{}")'.format(
             typename, syscall, parameter_name)
 
+        # Build an expression that evaluates to the size of this parameter type.
+        element_size = 'ElementSize<{}>("{}", "{}")'.format(
+            typename, syscall, parameter_name)
+
         # Build a parameter table key, value pair.
-        lines.append(' {{{}, {{"{}", {}, "{}", {}, "{}", {}}}}}'.format(
+        lines.append(' {{{}, {{"{}", {}, "{}", {}, "{}", {}, {}}}}}'.format(
             parameter_offset, syscall, parameter_offset, parameter_name,
-            type_flags, typename, encoding_size))
+            type_flags, typename, encoding_size, element_size))
 
         parameter_offset += 1
 

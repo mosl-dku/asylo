@@ -19,9 +19,13 @@
 #ifndef ASYLO_CRYPTO_SIGNING_KEY_H_
 #define ASYLO_CRYPTO_SIGNING_KEY_H_
 
+#include <openssl/base.h>
+
 #include <cstdint>
+#include <string>
 
 #include "asylo/crypto/algorithms.pb.h"
+#include "asylo/crypto/keys.pb.h"
 #include "asylo/crypto/util/byte_container_view.h"
 #include "asylo/util/cleansing_types.h"
 #include "asylo/util/status.h"
@@ -34,6 +38,10 @@ class VerifyingKey {
  public:
   virtual ~VerifyingKey() = default;
 
+  virtual bool operator==(const VerifyingKey &other) const = 0;
+
+  virtual bool operator!=(const VerifyingKey &other) const;
+
   // Returns the signature scheme used by this VerifyingKey.
   virtual SignatureScheme GetSignatureScheme() const = 0;
 
@@ -41,12 +49,22 @@ class VerifyingKey {
   // the serialized key.
   virtual StatusOr<std::string> SerializeToDer() const = 0;
 
+  // Serializes this VerifyingKey into a PEM-encoded key structure and returns
+  // the serialized key.
+  virtual StatusOr<std::string> SerializeToPem() const = 0;
+
+  // Returns an AsymmetricSigningKeyProto representation of this VerifyingKey
+  // that uses |encoding|.
+  StatusOr<AsymmetricSigningKeyProto> SerializeToKeyProto(
+      AsymmetricKeyEncoding encoding) const;
+
   // Verifies that |signature| is a valid signature over a hash of |message|
-  // produced by the underlying hash function. Returns true if verification
-  // succeeds, and false if verification failed or an error occurred during
-  // verification.
+  // produced by the underlying hash function. Returns a non-OK Status if
+  // verification failed or an error occurred during verification.
   virtual Status Verify(ByteContainerView message,
                         ByteContainerView signature) const = 0;
+  virtual Status Verify(ByteContainerView message,
+                        const Signature &signature) const = 0;
 };
 
 // SigningKey abstracts a signing key from an asymmetric key-pair.
@@ -57,10 +75,17 @@ class SigningKey {
   // Returns the signature scheme used by this SigningKey.
   virtual SignatureScheme GetSignatureScheme() const = 0;
 
-  // Serializes this SigningKey into a DER-encoded key structure and writes it
+  // Serializes this SigningKey into a DER-encoded key structure and returns the
+  // serialized key.
+  virtual StatusOr<CleansingVector<uint8_t>> SerializeToDer() const = 0;
+
+  // Serializes this SigningKey into a PEM-encoded key structure and writes it
   // to |serialized_key|.
-  virtual Status SerializeToDer(
-      CleansingVector<uint8_t> *serialized_key) const = 0;
+  virtual StatusOr<CleansingVector<char>> SerializeToPem() const = 0;
+
+  // Returns an AsymmetricSigningKeyProto representation of this SigningKey.
+  StatusOr<AsymmetricSigningKeyProto> SerializeToKeyProto(
+      AsymmetricKeyEncoding encoding) const;
 
   // Returns a VerifyingKey that can verify signatures produced by this
   // SigningKey.
@@ -71,6 +96,14 @@ class SigningKey {
   // non-OK Status if the signing operation failed.
   virtual Status Sign(ByteContainerView message,
                       std::vector<uint8_t> *signature) const = 0;
+  virtual Status Sign(ByteContainerView message,
+                      Signature *signature) const = 0;
+
+  // Signs |x509|. Returns a non-OK Status if the signing operation failed. This
+  // method treats |x509| as an in-out parameter.
+  //
+  // This function should only be used by Asylo's certificate abstractions.
+  virtual Status SignX509(X509 *x509) const = 0;
 };
 
 }  // namespace asylo

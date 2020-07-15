@@ -16,17 +16,19 @@
  *
  */
 
-#include <unistd.h>
-
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
+
 #include <cstdlib>
 #include <cstring>
 
-#include "asylo/platform/arch/include/trusted/fork.h"
-#include "asylo/platform/arch/include/trusted/host_calls.h"
 #include "asylo/platform/core/trusted_global_state.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 #include "asylo/platform/posix/io/io_manager.h"
+#include "asylo/platform/primitives/trusted_primitives.h"
+#include "asylo/platform/primitives/trusted_runtime.h"
 #include "asylo/util/statusor.h"
 
 using asylo::io::IOManager;
@@ -55,7 +57,7 @@ pid_t ForkEnclave() {
     return -1;
   }
 
-  return asylo::enc_fork(asylo::GetEnclaveName().c_str(), *config);
+  return asylo::enc_fork(asylo::GetEnclaveName().c_str());
 }
 
 }  // namespace
@@ -104,10 +106,17 @@ int gethostname(char *name, size_t len) {
   }
   std::string host_name = config->host_name();
   int size = host_name.size();
+#ifdef HOST_NAME_MAX
+  // The host name size is limited to HOST_NAME_MAX (without the trailing zero).
+  if (size >= HOST_NAME_MAX) {
+    size = HOST_NAME_MAX;
+  }
+#endif
   // Truncate |host_name| if longer than size of the buffer.
   if (size >= len) {
     size = len - 1;
   }
+
   memcpy(name, host_name.c_str(), size);
   name[size] = '\0';
   return 0;
@@ -260,8 +269,8 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
 int enclave_getpid() {
   int pid = enc_untrusted_getpid();
   if (pid == 0) {
-    enc_untrusted_puts("FATAL ERROR: Host returned 0 from getpid()");
-    abort();
+    ::asylo::primitives::TrustedPrimitives::BestEffortAbort(
+        "FATAL ERROR: Host returned 0 from getpid()");
   }
   return pid;
 }
@@ -277,7 +286,9 @@ int enclave_unlink(const char *pathname) {
 }
 
 void enclave_exit(int rc) {
-  enc_untrusted__exit(rc);
+  while (true) {
+    enc_exit(rc);
+  }
 }
 
 pid_t enclave_fork() { return ForkEnclave(); }

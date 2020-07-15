@@ -18,9 +18,4 @@ syntax = "proto2";
 
 package asylo;
 
-// Configuration for an SGX local assertion authority.
-message SgxLocalAssertionAuthorityConfig {
-  // A 16-byte string containing the attestation domain to which this SGX local
-  // assertion authority belongs.
-  optional bytes attestation_domain = 1;
-}
+import public "asylo/identity/attestation/sgx/sgx_local_assertion_authority_config.proto";

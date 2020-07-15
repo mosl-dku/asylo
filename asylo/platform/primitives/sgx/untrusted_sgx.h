@@ -19,15 +19,24 @@
 #ifndef ASYLO_PLATFORM_PRIMITIVES_SGX_UNTRUSTED_SGX_H_
 #define ASYLO_PLATFORM_PRIMITIVES_SGX_UNTRUSTED_SGX_H_
 
-#include <string>
+#include <cstddef>
+#include <memory>
 
+#include "absl/strings/string_view.h"
 #include "asylo/enclave.pb.h"  // IWYU pragma: export
+#include "asylo/platform/primitives/sgx/fork.pb.h"
 #include "asylo/platform/primitives/untrusted_primitives.h"
+#include "asylo/platform/primitives/util/message.h"
+#include "asylo/util/status.h"
 #include "asylo/util/statusor.h"
 #include "include/sgx_urts.h"
 
 namespace asylo {
 namespace primitives {
+
+typedef Client *(*forked_loader_callback_t)(absl::string_view enclave_name,
+                                            void *enclave_base_address,
+                                            size_t enclave_size);
 
 // Implementation of the generic "EnclaveBackend" concept for Intel Software
 // Guard Extensions (SGX) based enclaves located in shared object files read
@@ -66,6 +75,10 @@ class SgxEnclaveClient : public Client {
   // finalization function fails.
   Status Destroy() override;
 
+  // Registers exit handlers that are specific to SGX, for example, handler for
+  // thread creation.
+  Status RegisterExitHandlers() override;
+
   // Returns the sgx_enclave_id_t value of the underlying Intel SGX SDK enclave
   // resource.
   sgx_enclave_id_t GetEnclaveId() const;
@@ -79,9 +92,31 @@ class SgxEnclaveClient : public Client {
   // Updates |token| with the SGX SDK launch token.
   void GetLaunchToken(sgx_launch_token_t *token) const;
 
+  // Enters the enclave and invokes the snapshotting entry-point.
+  Status EnterAndTakeSnapshot(SnapshotLayout *snapshot_layout);
+
+  // Enters the enclave and invokes the restoring entry-point.
+  Status EnterAndRestore(const SnapshotLayout &snapshot_layout);
+
+  Status EnterAndTransferSecureSnapshotKey(
+      const ForkHandshakeConfig &fork_handshake_config);
+
+  int EnterAndHandleSignal(int signum, int sigcode);
+
+  // Sets a new expected process ID for an existing SGX enclave.
+  void SetProcessId();
+
+  // Sets the callback function which loads a new child enclave based on the
+  // parent when fork() is called.
+  static void SetForkedEnclaveLoader(forked_loader_callback_t callback);
+
+  // Gets the callback function which loads a new child enclave based on the
+  // parent when fork() is called.
+  static forked_loader_callback_t GetForkedEnclaveLoader();
+
  protected:
-  Status EnclaveCallInternal(uint64_t selector,
-                             NativeParameterStack *params) override;
+  Status EnclaveCallInternal(uint64_t selector, MessageWriter *input,
+                             MessageReader *output) override;
   bool IsClosed() const override;
 
  private:
@@ -89,15 +124,15 @@ class SgxEnclaveClient : public Client {
   friend SgxEmbeddedBackend;
 
   // Constructor.
-  SgxEnclaveClient(
-      const absl::string_view name,
-      std::unique_ptr<ExitCallProvider> exit_call_provider)
+  SgxEnclaveClient(const absl::string_view name,
+                   std::unique_ptr<ExitCallProvider> exit_call_provider)
       : Client(name, std::move(exit_call_provider)) {}
 
   sgx_launch_token_t token_ = {0};  // SGX SDK launch token.
   sgx_enclave_id_t id_;             // SGX SDK enclave identifier.
   void *base_address_;              // Enclave base address.
   size_t size_;                     // Enclave size.
+  bool is_destroyed_ = true;        // Whether enclave is destroyed.
 };
 
 }  // namespace primitives

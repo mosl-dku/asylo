@@ -36,7 +36,7 @@ extern "C" {
 
 int enclave_close(int fd) { return IOManager::GetInstance().Close(fd); }
 
-int enclave_open(char *path_name, int flags, int mode) {
+int enclave_open(const char *path_name, int flags, int mode) {
   return IOManager::GetInstance().Open(path_name, flags, mode);
 }
 
@@ -44,9 +44,8 @@ int enclave_read(int fd, char *buf, int count) {
   return IOManager::GetInstance().Read(fd, static_cast<char *>(buf), count);
 }
 
-int enclave_write(int fd, char *buf, int count) {
-  return IOManager::GetInstance().Write(fd, static_cast<const char *>(buf),
-                                        count);
+int enclave_write(int fd, const char *buf, int count) {
+  return IOManager::GetInstance().Write(fd, buf, count);
 }
 
 int enclave_fcntl(int fd, int cmd, int64_t arg) {
@@ -57,7 +56,7 @@ int enclave_lseek(int fd, int ptr, int dir) {
   return IOManager::GetInstance().LSeek(fd, ptr, dir);
 }
 
-int enclave_link(char *existing, char *new_link) {
+int enclave_link(const char *existing, const char *new_link) {
   return IOManager::GetInstance().Link(existing, new_link);
 }
 
@@ -67,10 +66,6 @@ int enclave_mkdir(const char *pathname, mode_t mode) {
 
 int enclave_stat(const char *file, struct stat *st) {
   return IOManager::GetInstance().Stat(file, st);
-}
-
-int rename(const char *oldpath, const char *newpath) {
-  return IOManager::GetInstance().Rename(oldpath, newpath);
 }
 
 }  // extern "C"

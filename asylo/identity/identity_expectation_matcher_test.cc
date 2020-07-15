@@ -21,7 +21,9 @@
 #include <string>
 
 #include <google/protobuf/util/message_differencer.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/strings/str_format.h"
 #include "asylo/identity/delegating_identity_expectation_matcher.h"
 #include "asylo/identity/identity.pb.h"
 #include "asylo/identity/named_identity_expectation_matcher.h"
@@ -32,6 +34,8 @@
 namespace asylo {
 namespace {
 
+using ::testing::Eq;
+using ::testing::HasSubstr;
 using ::testing::Not;
 
 // Makes an identity description whose authority_type string is constructed
@@ -78,16 +82,27 @@ class TestMatcher final : public NamedIdentityExpectationMatcher {
     return MakeDescription<C>();
   }
 
-  StatusOr<bool> Match(
-      const EnclaveIdentity &identity,
-      const EnclaveIdentityExpectation &expectation) const override {
+  StatusOr<bool> MatchAndExplain(const EnclaveIdentity &identity,
+                                 const EnclaveIdentityExpectation &expectation,
+                                 std::string *explanation) const override {
+    const EnclaveIdentity &reference_identity =
+        expectation.reference_identity();
     if (!::google::protobuf::util::MessageDifferencer::Equivalent(identity.description(),
                                                         Description()) ||
         !::google::protobuf::util::MessageDifferencer::Equivalent(
-            expectation.reference_identity().description(), Description())) {
+            reference_identity.description(), Description())) {
       return Status(error::GoogleError::INTERNAL, "Incorrect description");
     }
-    return identity.identity() == expectation.reference_identity().identity();
+
+    if (identity.identity() != reference_identity.identity()) {
+      if (explanation != nullptr) {
+        *explanation =
+            absl::StrFormat("Identity %s does not match expected identity %s",
+                            identity.identity(), reference_identity.identity());
+      }
+      return false;
+    }
+    return true;
   }
 };
 
@@ -108,8 +123,11 @@ TEST(IdentityExpectationMatcherTest, MatchIfDescriptionsAndIdentitiesMatch) {
   EnclaveIdentity identity = MakeIdentity<'A'>("foo");
   EnclaveIdentityExpectation expectation = MakeExpectation<'A'>("foo");
 
+  std::string explanation;
   DelegatingIdentityExpectationMatcher matcher;
-  EXPECT_THAT(matcher.Match(identity, expectation), IsOkAndHolds(true));
+  EXPECT_THAT(matcher.MatchAndExplain(identity, expectation, &explanation),
+              IsOkAndHolds(true));
+  EXPECT_THAT(explanation, Eq(""));
 }
 
 // Tests that identity and expectation of type 'A' do not match each other if
@@ -118,44 +136,52 @@ TEST(IdentityExpectationMatcherTest, MatchFailsIfIdentityMatchFails) {
   EnclaveIdentity identity = MakeIdentity<'A'>("foo");
   EnclaveIdentityExpectation expectation = MakeExpectation<'A'>("bar");
 
+  std::string explanation;
   DelegatingIdentityExpectationMatcher matcher;
-  EXPECT_THAT(matcher.Match(identity, expectation), IsOkAndHolds(false));
+  ASSERT_THAT(matcher.MatchAndExplain(identity, expectation, &explanation),
+              IsOkAndHolds(false));
+  EXPECT_THAT(explanation, HasSubstr("does not match expected identity"));
 }
 
 // Tests that identity of type 'A' does not match expectation of type 'B'. Since
 // TestMatcherA and TestMatcherB are both registered in the static map, the
-// Match() method of the delegating matcher returns false.
+// MatchAndExplain() method of the delegating matcher returns false.
 TEST(IdentityExpectationMatcherTest, MatchFailsIfDescriptionMatchFails) {
   EnclaveIdentity identity = MakeIdentity<'A'>("foo");
   EnclaveIdentityExpectation expectation = MakeExpectation<'B'>("foo");
 
+  std::string explanation;
   DelegatingIdentityExpectationMatcher matcher;
-  EXPECT_THAT(matcher.Match(identity, expectation), IsOkAndHolds(false));
+  EXPECT_THAT(matcher.MatchAndExplain(identity, expectation, &explanation),
+              IsOkAndHolds(false));
+  EXPECT_THAT(explanation, HasSubstr("incompatible with reference identity"));
 }
 
 // Tests that identity of type 'C' does not match expectation of type 'A'.
 // However, since TestMatcher<'C'> is not registered in the static map, the
-// Match() method of the delegating matcher returns a non-ok status.
+// MatchAndExplain() method of the delegating matcher returns a non-ok status.
 TEST(IdentityExpectationMatcherTest, MatchFailsIfIdentityDescriptionInvalid) {
   EnclaveIdentity identity = MakeIdentity<'C'>("foo");
   EnclaveIdentityExpectation expectation = MakeExpectation<'A'>("foo");
 
   DelegatingIdentityExpectationMatcher matcher;
-  StatusOr<bool> match_result = matcher.Match(identity, expectation);
+  StatusOr<bool> match_result =
+      matcher.MatchAndExplain(identity, expectation, /*explanation=*/nullptr);
 
   EXPECT_THAT(match_result, Not(IsOk()));
 }
 
 // Tests that identity of type 'A' does not match expectation of type 'C'.
 // However, since TestMatcher<'C'> is not registered in the static map, the
-// Match() method of the delegating matcher returns a non-ok status.
+// MatchAndExplain() method of the delegating matcher returns a non-ok status.
 TEST(IdentityExpectationMatcherTest,
      MatchFailsIfExpectationDescriptionInvalid) {
   EnclaveIdentity identity = MakeIdentity<'A'>("foo");
   EnclaveIdentityExpectation expectation = MakeExpectation<'C'>("foo");
 
   DelegatingIdentityExpectationMatcher matcher;
-  StatusOr<bool> match_result = matcher.Match(identity, expectation);
+  StatusOr<bool> match_result =
+      matcher.MatchAndExplain(identity, expectation, /*explanation=*/nullptr);
 
   EXPECT_THAT(match_result, Not(IsOk()));
 }

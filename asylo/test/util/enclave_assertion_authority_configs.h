@@ -20,36 +20,34 @@
 #define ASYLO_TEST_UTIL_ENCLAVE_ASSERTION_AUTHORITY_CONFIGS_H_
 
 #include "asylo/identity/enclave_assertion_authority_config.pb.h"
+#include "asylo/identity/platform/sgx/sgx_identity.pb.h"
 
 namespace asylo {
 
-// This file provides test configs that can be used to initialize the various
-// enclave assertion authorities.
-//
-// To configure assertion authorities in the untrusted application, use a call
-// like the following:
-//
-//   std::vector<EnclaveAssertionAuthorityConfig> authority_configs = {
-//       GetFooAssertionAuthorityTestConfig(),
-//   };
-//   ASSERT_OK(InitializeEnclaveAssertionAuthorities(
-//       authority_configs.cbegin(), authority_configs.cend());
-//
-// To configure assertion authorities inside an enclave, pass the configuration
-// through the EnclaveConfig:
-//
-//   EnclaveManager *manager = ...
-//   EnclaveLoader loader = ...
-//   EnclaveConfig config;
-//   *config.add_enclave_assertion_authority_configs() =
-//       GetFooAssertionAuthorityTestConfig();
-//   ASSERT_OK(manager->LoadEnclave("/some/enclave/path", loader, config));
-
-// Gets a suitable test configuration for null assertion authorities.
+// Creates a suitable test configuration for the null assertion authority. This
+// configuration is required when using the NullAssertionGenerator or
+// NullAssertionVerifier.
 EnclaveAssertionAuthorityConfig GetNullAssertionAuthorityTestConfig();
 
-// Gets a suitable test configuration for SGX local assertion authorities.
+// Creates a suitable test configuration for the SGX local assertion authority.
+// This configuration is required when using the SgxLocalAssertionGenerator,
+// SgxLocalAssertionVerifier, or SgxRemoteAssertionGenerator.
 EnclaveAssertionAuthorityConfig GetSgxLocalAssertionAuthorityTestConfig();
+
+// Creates a suitable test configuration for the SGX AGE-based remote assertion
+// authority where the AGE service is located at |server_address| and the AGE
+// has the identity |age_identity|. This configuration is required when using
+// the SgxAgeRemoteAssertionGenerator or SgxAgeRemoteAssertionVerifier.
+EnclaveAssertionAuthorityConfig GetSgxAgeRemoteAssertionAuthorityTestConfig(
+    std::string server_address, SgxIdentity age_identity);
+
+// Creates a suitable test configuration for the SGX AGE-based remote assertion
+// authority where the AGE service is located at |server_address|. The AGE
+// identity expectation matches on the default test enclave configuration. This
+// configuration is required when using the SgxAgeRemoteAssertionGenerator or
+// SgxAgeRemoteAssertionVerifier.
+EnclaveAssertionAuthorityConfig GetSgxAgeRemoteAssertionAuthorityTestConfig(
+    std::string server_address);
 
 }  // namespace asylo
 

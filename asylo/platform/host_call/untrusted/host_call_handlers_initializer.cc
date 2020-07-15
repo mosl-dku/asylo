@@ -17,6 +17,7 @@
  */
 
 #include "asylo/platform/host_call/untrusted/host_call_handlers_initializer.h"
+
 #include "asylo/platform/host_call/exit_handler_constants.h"
 #include "asylo/platform/host_call/untrusted/host_call_handlers.h"
 #include "asylo/util/status_macros.h"
@@ -25,21 +26,100 @@
 namespace asylo {
 namespace host_call {
 
-StatusOr<std::unique_ptr<primitives::Client::ExitCallProvider>>
-GetHostCallHandlersMapping() {
-  std::unique_ptr<primitives::Client::ExitCallProvider> dispatch_table =
-      absl::make_unique<primitives::DispatchTable>();
-
-  ASYLO_RETURN_IF_ERROR(dispatch_table->RegisterExitHandler(
+Status AddHostCallHandlersToExitCallProvider(
+    primitives::Client::ExitCallProvider *exit_call_provider) {
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
       kSystemCallHandler, primitives::ExitHandler{SystemCallHandler}));
 
-  ASYLO_RETURN_IF_ERROR(dispatch_table->RegisterExitHandler(
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
       kIsAttyHandler, primitives::ExitHandler{IsAttyHandler}));
 
-  ASYLO_RETURN_IF_ERROR(dispatch_table->RegisterExitHandler(
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
       kUSleepHandler, primitives::ExitHandler{USleepHandler}));
 
-  return std::move(dispatch_table);
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kSysconfHandler, primitives::ExitHandler{SysconfHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kReallocHandler, primitives::ExitHandler{ReallocHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kSleepHandler, primitives::ExitHandler{SleepHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kSendMsgHandler, primitives::ExitHandler{SendMsgHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kRecvMsgHandler, primitives::ExitHandler{RecvMsgHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetSocknameHandler, primitives::ExitHandler{GetSocknameHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kAcceptHandler, primitives::ExitHandler{AcceptHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetPeernameHandler, primitives::ExitHandler{GetPeernameHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kRecvFromHandler, primitives::ExitHandler{RecvFromHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kRaiseHandler, primitives::ExitHandler{RaiseHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetSockOptHandler, primitives::ExitHandler{GetSockOptHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetAddrInfoHandler, primitives::ExitHandler{GetAddrInfoHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kInetPtonHandler, primitives::ExitHandler{InetPtonHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kInetNtopHandler, primitives::ExitHandler{InetNtopHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kSigprocmaskHandler, primitives::ExitHandler{SigprocmaskHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kIfNameToIndexHandler, primitives::ExitHandler{IfNameToIndexHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kIfIndexToNameHandler, primitives::ExitHandler{IfIndexToNameHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetIfAddrsHandler, primitives::ExitHandler{GetIfAddrsHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetCpuClockIdHandler, primitives::ExitHandler{GetCpuClockIdHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kGetPwUidHandler, primitives::ExitHandler{GetPwUidHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kHexDumpHandler, primitives::ExitHandler{HexDumpHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kOpenLogHandler, primitives::ExitHandler{OpenLogHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kInotifyReadHandler, primitives::ExitHandler{InotifyReadHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kClockGettimeHandler, primitives::ExitHandler{ClockGettimeHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kSysFutexWaitHandler, primitives::ExitHandler{SysFutexWaitHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kSysFutexWakeHandler, primitives::ExitHandler{SysFutexWakeHandler}));
+
+  ASYLO_RETURN_IF_ERROR(exit_call_provider->RegisterExitHandler(
+      kLocalLifetimeAllocHandler,
+      primitives::ExitHandler{LocalLifetimeAllocHandler}));
+
+  return Status::OkStatus();
 }
 
 }  // namespace host_call
