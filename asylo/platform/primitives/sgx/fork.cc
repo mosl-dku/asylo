@@ -150,4 +150,8 @@ int TransferSecureSnapshotKey(const char *input, size_t input_len,
   return status_serializer.Serialize(status);
 }
 
+int InitiateMigration(){
+  return primitives::InvokeInitiateMigration(asylo::GetEnclaveName().c_str());
+}
+
 }  // namespace asylo

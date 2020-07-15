@@ -31,6 +31,8 @@ int Restore(const char *snapshot_layout, size_t snapshot_layout_len,
 int TransferSecureSnapshotKey(const char *input, size_t input_len,
                               char **output, size_t *output_len);
 
+// Sets migration request, which allows a snapshot of the enclave to be taken.
+void SetMigrationRequested();
 }  // namespace asylo
 
 #endif  // ASYLO_PLATFORM_PRIMITIVES_SGX_FORK_H_

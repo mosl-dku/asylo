@@ -112,6 +112,17 @@ pid_t InvokeFork(const char *enclave_name, bool restore_snapshot) {
   return ret;
 }
 
+int InvokeInitiateMigration(const char *enclave_name) {
+  int ret = 0;
+  sgx_status_t sgx_status;
+  sgx_status = ocall_enc_untrusted_initiate_migration(&ret, enclave_name);
+  if (sgx_status != SGX_SUCCESS) {
+    errno = EINTR;
+    return -1;
+  }
+  return ret;
+}
+
 // Entry handler installed by the runtime to finalize the enclave at the time it
 // is destroyed.
 PrimitiveStatus FinalizeEnclave(void *context, MessageReader *in,

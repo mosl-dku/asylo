@@ -101,6 +101,8 @@ class SgxEnclaveClient : public Client {
   Status EnterAndTransferSecureSnapshotKey(
       const ForkHandshakeConfig &fork_handshake_config);
 
+  Status InitiateMigration();
+
   int EnterAndHandleSignal(int signum, int sigcode);
 
   // Sets a new expected process ID for an existing SGX enclave.

@@ -28,6 +28,7 @@
 #include "asylo/util/logging.h"
 #include "asylo/platform/primitives/primitives.h"
 #include "asylo/platform/primitives/sgx/fork.h"
+#include "asylo/platform/primitives/sgx/fork_internal.h"
 #include "asylo/platform/primitives/sgx/generated_bridge_t.h"
 #include "asylo/platform/primitives/sgx/trusted_sgx.h"
 #include "asylo/platform/primitives/trusted_primitives.h"
@@ -45,6 +46,7 @@
 int ecall_take_snapshot(char **output, uint64_t *output_len) {
   int result = 0;
   size_t tmp_output_len;
+  LOG(INFO) << "ecall_tranfer_secure_snapshot_key";
   try {
     result = asylo::TakeSnapshot(output, &tmp_output_len);
   } catch (...) {
@@ -96,6 +98,15 @@ int ecall_transfer_secure_snapshot_key(const char *input, uint64_t input_len,
   if (output_len) {
     *output_len = static_cast<size_t>(bridge_output_len);
   }
+  return result;
+}
+
+int ecall_initiate_migration() {
+  int result = 0;
+  asylo::SaveThreadLayoutForSnapshot();
+  asylo::SetForkRequested();
+  asylo::SetMigrationRequested();
+
   return result;
 }
 
