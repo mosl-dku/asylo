@@ -19,6 +19,7 @@
 #include "asylo/util/remote/remote_provision_server_lib.h"
 
 #include <fcntl.h>
+#include <openssl/sha.h>
 
 #include <cstdint>
 #include <memory>
@@ -30,7 +31,6 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "asylo/crypto/sha256_hash.h"
 #include "asylo/platform/primitives/remote/util/proxy_launcher.h"
 #include "asylo/util/cleanup.h"
 #include "asylo/util/mutex_guarded.h"
@@ -73,7 +73,8 @@ StatusOr<std::string> ProvisionServiceImpl::PrepareEnclave(
     grpc::ServerReader<ProvisionRequest> *reader) {
   const std::string filename =
       JoinPath(storage_dir_, absl::StrCat("enclave_", ++enclave_index_));
-  Sha256Hash hasher;
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
   {
     ProvisionRequest request;
     if (!reader->Read(&request)) {
@@ -109,11 +110,13 @@ StatusOr<std::string> ProvisionServiceImpl::PrepareEnclave(
 
     do {
       if (!request.enclave_binary().empty()) {
-        hasher.Update(request.enclave_binary());
-        std::vector<uint8_t> hash(kSha256DigestLength, '\0');
-        hasher.CumulativeHash(&hash);
-        if (ByteContainerView(request.cumulative_sha256()) !=
-            ByteContainerView(hash)) {
+        SHA256_Update(&sha256, request.enclave_binary().data(),
+                      request.enclave_binary().size());
+        std::string hash(SHA256_DIGEST_LENGTH, '\0');
+        SHA256_Final(
+            reinterpret_cast<uint8_t *>(const_cast<char *>(hash.data())),
+            &sha256);
+        if (request.cumulative_sha256() != hash) {
           return Status{error::GoogleError::DATA_LOSS,
                         "SHA256 hash mismatch"};
         }

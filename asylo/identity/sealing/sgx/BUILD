@@ -59,7 +59,6 @@ cc_test(
     deps = [
         ":sgx_local_secret_sealer",
         "//asylo/crypto:algorithms_cc_proto",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/crypto/util:bytes",
         "//asylo/crypto/util:trivial_object_util",

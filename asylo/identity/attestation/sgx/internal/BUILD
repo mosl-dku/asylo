@@ -21,7 +21,7 @@ load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
 load("@linux_sgx//:sgx_sdk.bzl", "sgx")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library", "cc_test")
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load("//asylo/bazel:asylo.bzl", "cc_test_and_cc_enclave_test", "enclave_test")
+load("//asylo/bazel:asylo.bzl", "cc_test_and_cc_enclave_test")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 load(
     "//asylo/bazel:sgx_rules.bzl",
@@ -177,8 +177,8 @@ cc_library(
     hdrs = ["intel_architectural_enclave_interface.h"],
     copts = ASYLO_DEFAULT_COPTS,
     visibility = [
-        "//asylo/identity/attestation/sgx:__subpackages__",
-        "//asylo/identity/provisioning/sgx:__subpackages__",
+        "//asylo/identity/attestation/sgx:__pkg__",
+        "//asylo/identity/sgx:__pkg__",
     ],
     deps = [
         "//asylo/crypto:algorithms_cc_proto",
@@ -251,10 +251,7 @@ cc_library(
     srcs = ["dcap_intel_architectural_enclave_interface.cc"],
     hdrs = ["dcap_intel_architectural_enclave_interface.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = [
-        "//asylo/identity/attestation/sgx:__subpackages__",
-        "//asylo/identity/provisioning/sgx:__subpackages__",
-    ],
+    visibility = ["//asylo/identity/attestation/sgx:__pkg__"],
     deps = [
         ":dcap_library_interface",
         ":intel_architectural_enclave_interface",
@@ -274,13 +271,11 @@ cc_library(
 
 cc_library(
     name = "dcap_intel_architectural_enclave_path_setter",
+    testonly = 1,
     srcs = ["dcap_intel_architectural_enclave_path_setter.cc"],
     hdrs = ["dcap_intel_architectural_enclave_path_setter.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = [
-        "//asylo/identity/attestation/sgx:__subpackages__",
-        "//asylo/identity/provisioning/sgx:__subpackages__",
-    ],
+    visibility = ["//asylo/identity/attestation/sgx:__pkg__"],
     deps = [
         ":dcap_intel_architectural_enclave_interface",
         ":host_dcap_library_interface",
@@ -423,58 +418,6 @@ sgx_debug_sign_enclave(
     name = "report_oracle_enclave.so",
     config = ":report_oracle_enclave_config",
     unsigned = "report_oracle_enclave_unsigned.so",
-    visibility = [
-        "//asylo/identity/attestation/sgx:__subpackages__",
-        "//asylo/identity/provisioning/sgx:__subpackages__",
-    ],
-)
-
-cc_library(
-    name = "report_oracle_enclave_wrapper",
-    srcs = ["report_oracle_enclave_wrapper.cc"],
-    hdrs = ["report_oracle_enclave_wrapper.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    visibility = [
-        "//asylo/identity/attestation/sgx:__subpackages__",
-        "//asylo/identity/provisioning/sgx:__subpackages__",
-    ],
-    deps = [
-        ":report_oracle_enclave_cc_proto",
-        "//asylo/crypto/util:trivial_object_util",
-        "//asylo/identity/platform/sgx/internal:hardware_types",
-        "//asylo/identity/provisioning/sgx/internal:platform_provisioning",
-        "//asylo/identity/provisioning/sgx/internal:platform_provisioning_cc_proto",
-        "//asylo/platform/core:untrusted_core",
-        "//asylo/platform/primitives/sgx:loader_cc_proto",
-        "//asylo/util:status",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/random:distributions",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
-enclave_test(
-    name = "report_oracle_enclave_wrapper_test",
-    srcs = ["report_oracle_enclave_wrapper_test.cc"],
-    backends = sgx.sim_backend_labels,  # Don't require FLC to run the test
-    copts = ASYLO_DEFAULT_COPTS,
-    embedded_enclaves = {"report_oracle": ":report_oracle_enclave.so"},
-    enclaves = {
-        "report_oracle_enclave_path": ":report_oracle_enclave.so",
-    },
-    test_args = ["--report_oracle_enclave_path='{report_oracle_enclave_path}'"],
-    deps = [
-        ":report_oracle_enclave_wrapper",
-        "//asylo/crypto/util:trivial_object_util",
-        "//asylo/identity/platform/sgx/internal:hardware_types",
-        "//asylo/platform/primitives/sgx:sgx_error_space",
-        "//asylo/test/util:memory_matchers",
-        "//asylo/test/util:status_matchers",
-        "//asylo/test/util:test_main",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_googletest//:gtest",
-    ],
 )
 
 sgx_enclave_test(
@@ -491,7 +434,7 @@ sgx_enclave_test(
         ":host_dcap_library_interface",
         ":intel_ecdsa_quote",
         ":pce_util",
-        ":report_oracle_enclave_wrapper",
+        ":report_oracle_enclave_cc_proto",
         "//asylo:enclave_cc_proto",
         "//asylo:enclave_client",
         "//asylo/crypto:algorithms_cc_proto",
@@ -696,10 +639,6 @@ cc_library(
     srcs = ["pce_util.cc"],
     hdrs = ["pce_util.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    visibility = [
-        "//asylo/identity/attestation/sgx:__subpackages__",
-        "//asylo/identity/provisioning/sgx:__subpackages__",
-    ],
     deps = [
         "//asylo/crypto:algorithms_cc_proto",
         "//asylo/crypto:keys_cc_proto",

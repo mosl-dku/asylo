@@ -340,7 +340,6 @@ void SaveThreadLayoutForSnapshot() {
 void SetForkRequested() { fork_requested = true; }
 void SetMigrationRequested() { migration_requested = true; }
 
-
 // Takes a snapshot of the enclave data/bss/heap and stack for the calling
 // thread by copying to untrusted memory.
 Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
@@ -673,27 +672,27 @@ Status RestoreForFork(const char *input, size_t input_len) {
       break;
     }
 
-    // Now that data is restored, the information of the thread and stack
-    // address of the calling thread can be retrieved. Decrypts the thread
+    // Decrypt and restore data, bss section and heap before restoring thread
     // information and stack.
-    Status status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
+    Status status = DecryptAndRestoreEnclaveDataBssHeap(
+        snapshot_layout, enclave_layout, snapshot_key);
     if (!status.ok()) {
       CopyNonOkStatus(status, &error_code, error_message,
                       ABSL_ARRAYSIZE(error_message));
       break;
     }
-    
+
     // migration do not restore thread stacks
     if (!migration_requested) {
-	  // Now that data is restored, the information of the thread and stack
-	  // address of the calling thread can be retrieved. Decrypts the thread
-		// information and stack.
-		  status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
-		  if (!status.ok()) {
-		    CopyNonOkStatus(status, &error_code, error_message,
-					              ABSL_ARRAYSIZE(error_message));
-		    break;
-		  }
+	    // Now that data is restored, the information of the thread and stack
+	    // address of the calling thread can be retrieved. Decrypts the thread
+      // information and stack.
+      status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
+      if (!status.ok()) {
+      CopyNonOkStatus(status, &error_code, error_message,
+              ABSL_ARRAYSIZE(error_message));
+      break;
+      }
     }
   } while (0);
 
@@ -857,6 +856,7 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
   enc_untrusted_write(fd, encrypted_snapshot_key_string.data(),
 						  encrypted_snapshot_key_string.size());
   enc_untrusted_close(fd);
+
   return Status::OkStatus();
 }
 
@@ -864,7 +864,6 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
 Status ReceiveSnapshotKey(std::unique_ptr<AeadCryptor> cryptor, int socket) {
   // Receives the encrypted snapshot key from the parent.
   char buf[1024];
-
   int fd, rc;
   int flag = O_RDONLY;
   int mode = S_IRWXU;
@@ -872,7 +871,6 @@ Status ReceiveSnapshotKey(std::unique_ptr<AeadCryptor> cryptor, int socket) {
   fd = enc_untrusted_open("/tmp/enc_snap_key", flag, mode);
   rc = enc_untrusted_read(fd, buf, sizeof(buf));
   enc_untrusted_close(fd);
-
   if (rc <= 0) {
     return Status(static_cast<error::PosixError>(errno), "Read failed");
   }
@@ -938,14 +936,15 @@ Status TransferSecureSnapshotKey(
   std::unique_ptr<AeadCryptor> cryptor;
   // TODO: Run Ekep at migration
   if (!migration_requested) {
-  // The parent should only start a key transfer if it's requested by a fork
-  // request inside an enclave.
-  if (is_parent && !ClearSnapshotKeyTransferRequested()) {
-    return Status(error::GoogleError::PERMISSION_DENIED,
-                  "Snapshot key transfer is not allowed unless requested by "
-                  "fork inside an enclave");
-  }
-      AssertionDescription description;
+    // The parent should only start a key transfer if it's requested by a fork
+    // request inside an enclave.
+    if (is_parent && !ClearSnapshotKeyTransferRequested()) {
+      return Status(error::GoogleError::PERMISSION_DENIED,
+                    "Snapshot key transfer is not allowed unless requested by "
+                    "fork inside an enclave");
+    }
+
+    AssertionDescription description;
     SetSgxLocalAssertionDescription(&description);
 
     EkepHandshakerOptions options;
@@ -961,14 +960,17 @@ Status TransferSecureSnapshotKey(
     } else {
       handshaker = ServerEkepHandshaker::Create(options);
     }
-        ASYLO_RETURN_IF_ERROR(RunEkepHandshake(handshaker.get(), is_parent,
+
+    ASYLO_RETURN_IF_ERROR(RunEkepHandshake(handshaker.get(), is_parent,
                                           fork_handshake_config.socket()));
+
     // Get peer identity from the handshake, and compare it with the identity
     // of the current enclave.
     EnclaveIdentity peer_identity =
         handshaker->GetPeerIdentities().ValueOrDie()->identities(0);
-    
-  ASYLO_RETURN_IF_ERROR(ComparePeerAndSelfIdentity(peer_identity));
+
+    ASYLO_RETURN_IF_ERROR(ComparePeerAndSelfIdentity(peer_identity));
+
     // Initialize a cryptor with the AES128-GCM record protocol key from the EKEP
     // handshake.
     CleansingVector<uint8_t> record_protocol_key;
@@ -976,15 +978,13 @@ Status TransferSecureSnapshotKey(
                           handshaker->GetRecordProtocolKey());
     ASYLO_ASSIGN_OR_RETURN(cryptor,
                           AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
-  } else {
-    // migration case
+  } else {  // migration case
     CleansingVector<uint8_t> record_protocol_key(kSnapshotKeySize);
     long long val  = 0x11;
     memcpy(record_protocol_key.data(), &val, sizeof(long long));
       ASYLO_ASSIGN_OR_RETURN(cryptor,
                           AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
   }
-  
   if (is_parent) {
     return EncryptAndSendSnapshotKey(std::move(cryptor),
                                      fork_handshake_config.socket());

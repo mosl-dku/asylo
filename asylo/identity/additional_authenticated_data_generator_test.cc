@@ -18,6 +18,8 @@
 
 #include "asylo/identity/additional_authenticated_data_generator.h"
 
+#include <openssl/sha.h>
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -25,7 +27,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/strings/escaping.h"
-#include "asylo/crypto/sha256_hash.h"
 #include "asylo/crypto/util/bytes.h"
 #include "asylo/test/util/status_matchers.h"
 
@@ -59,17 +60,17 @@ void GeneratesExpectedValue(
       aad_bytes, generator->Generate(absl::HexStringToBytes(kDataHex)));
 
   std::string aad(aad_bytes.begin(), aad_bytes.end());
-  ASSERT_EQ(aad.size(), kSha256DigestLength +
+  ASSERT_EQ(aad.size(), SHA256_DIGEST_LENGTH +
                             kAdditionalAuthenticatedDataPurposeSize +
                             kAdditionalAuthenticatedDataUuidSize);
 
-  EXPECT_EQ(aad.substr(0, kSha256DigestLength),
+  EXPECT_EQ(aad.substr(0, SHA256_DIGEST_LENGTH),
             absl::HexStringToBytes(kDataHashHex));
   EXPECT_EQ(
-      aad.substr(kSha256DigestLength, kAdditionalAuthenticatedDataPurposeSize),
+      aad.substr(SHA256_DIGEST_LENGTH, kAdditionalAuthenticatedDataPurposeSize),
       purpose);
   EXPECT_EQ(
-      aad.substr(kSha256DigestLength + kAdditionalAuthenticatedDataPurposeSize,
+      aad.substr(SHA256_DIGEST_LENGTH + kAdditionalAuthenticatedDataPurposeSize,
                  kAdditionalAuthenticatedDataUuidSize),
       uuid);
 }

@@ -114,7 +114,7 @@ class SgxLocalAssertionGeneratorTest : public ::testing::Test {
     // Only randomize the enclave measurement because the other fields in
     // Targetinfo have reserved sections that must be zeroed out.
     targetinfo.measurement =
-        TrivialRandomObject<UnsafeBytes<kSha256DigestLength>>();
+        TrivialRandomObject<UnsafeBytes<SHA256_DIGEST_LENGTH>>();
 
     return MakeAssertionRequest(
         absl::string_view(reinterpret_cast<const char *>(&targetinfo),

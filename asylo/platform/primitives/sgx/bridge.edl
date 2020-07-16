@@ -70,10 +70,10 @@ enclave {
         uint64_t input_len,
         [out] char **output,
         [out] uint64_t *output_len);
-        
+
         // Invokes a utility ecall that enters the enclave to initiate migration
         utility_tcs public int ecall_initiate_migration();
-
+        
   };
 
   untrusted {
@@ -92,11 +92,10 @@ enclave {
         [in, string]const char *enclave_name,
 	      bool restore_snapshot)
 	      allow(ecall_take_snapshot, ecall_restore) propagate_errno;
-
+    
     int ocall_enc_untrusted_initiate_migration(
         [in, string]const char* enclave_name)
         allow(ecall_take_snapshot, ecall_restore) propagate_errno;
-
 
     int ocall_enc_untrusted_register_signal_handler(
         int klinux_signum,

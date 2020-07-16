@@ -18,6 +18,8 @@
 
 #include "asylo/crypto/sha256_hash.h"
 
+#include <openssl/sha.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -55,7 +57,7 @@ TEST(Sha256HashTest, Algorithm) {
 
 TEST(Sha256HashTest, DigestSize) {
   Sha256Hash hash;
-  EXPECT_EQ(hash.DigestSize(), kSha256DigestLength);
+  EXPECT_EQ(hash.DigestSize(), SHA256_DIGEST_LENGTH);
 }
 
 // The following two tests verify the correctness of the Sha256Hash wrapper

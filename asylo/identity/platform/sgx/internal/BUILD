@@ -85,7 +85,6 @@ cc_library(
         ":hardware_interface",
         ":hardware_types",
         ":proto_format",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto:sha256_hash_cc_proto",
         "//asylo/crypto:sha256_hash_util",
         "//asylo/crypto/util:bssl_util",
@@ -157,7 +156,6 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bytes",
         "//asylo/identity:additional_authenticated_data_generator",
         "//asylo/identity/platform/sgx:architecture_bits",
@@ -203,7 +201,6 @@ cc_library(
     deps = [
         ":hardware_types",
         ":proto_format",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto:sha256_hash_cc_proto",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:bytes",
@@ -276,7 +273,6 @@ cc_test(
         ":hardware_interface",
         ":hardware_types",
         ":sgx_identity_util_internal",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bytes",
         "//asylo/crypto/util:trivial_object_util",
         "//asylo/identity/platform/sgx:architecture_bits",

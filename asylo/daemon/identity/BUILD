@@ -28,7 +28,6 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bssl_util",
         "//asylo/util:status",
         "@boringssl//:crypto",

@@ -131,7 +131,6 @@ cc_library(
     deps = [
         ":ekep_error_space",
         ":handshake_cc_proto",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/util:cleansing_types",
@@ -153,7 +152,6 @@ cc_test(
         ":ekep_crypto",
         ":ekep_error_space",
         ":handshake_cc_proto",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bytes",
         "//asylo/crypto/util:trivial_object_util",
         "//asylo/test/util:status_matchers",
@@ -175,7 +173,6 @@ cc_library(
         ":handshake_cc_proto",
         ":transcript",
         "//asylo/crypto:hash_interface",
-        "//asylo/crypto:sha256_hash",
         "//asylo/crypto/util:bssl_util",
         "//asylo/crypto/util:byte_container_view",
         "//asylo/grpc/auth/util:multi_buffer_input_stream",

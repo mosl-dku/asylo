@@ -19,8 +19,6 @@
 #ifndef ASYLO_TEST_UTIL_TEST_FLAGS_H_
 #define ASYLO_TEST_UTIL_TEST_FLAGS_H_
 
-#include <string>
-
 #include "absl/flags/declare.h"
 
 // Location for all temporary test files.

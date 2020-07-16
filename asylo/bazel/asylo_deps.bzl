@@ -117,12 +117,12 @@ def asylo_testonly_deps():
     if not native.existing_rule("com_google_googletest"):
         http_archive(
             name = "com_google_googletest",
-            # Commit from 2020 June 26
+            # Commit from 2020 May 14
             urls = [
-                "https://github.com/google/googletest/archive/aee0f9d9b5b87796ee8a0ab26b7587ec30e8858e.tar.gz",
+                "https://github.com/google/googletest/archive/011959aafddcd30611003de96cfd8d7a7685c700.tar.gz",
             ],
-            sha256 = "89e40180b66e6629d1dd80c3ca3ab036524ed4d6fda8544980e2d16a2d5cb4b0",
-            strip_prefix = "googletest-aee0f9d9b5b87796ee8a0ab26b7587ec30e8858e",
+            sha256 = "0e34ac9e3aac3af3977a7ca45c27bb941fbf3a803877a7e440f93a6f9dc9235f",
+            strip_prefix = "googletest-011959aafddcd30611003de96cfd8d7a7685c700",
         )
 
     # Redis example dependency, only needed if running Redis test with Asylo.
@@ -187,31 +187,31 @@ def asylo_deps(toolchain_path = None):
     if not native.existing_rule("boringssl"):
         http_archive(
             name = "boringssl",
-            # Commit from 2020 June 23
+            # Commit from 2020 May 14
             urls = [
-                "https://github.com/google/boringssl/archive/597b810379e126ae05d32c1d94b1a9464385acd0.tar.gz",
+                "https://github.com/google/boringssl/archive/a0899df79b3a63e606448c72d63a090d86bdb75b.tar.gz",
             ],
-            sha256 = "1ea42456c020daf0a9b0f9e8d8bc3a403c9314f4f54230c617257af996cd5fa6",
-            strip_prefix = "boringssl-597b810379e126ae05d32c1d94b1a9464385acd0",
+            sha256 = "07f1524766b9ed1543674b48e7fce7e3569b6e2b6c0c43ec124dedee9b60f641",
+            strip_prefix = "boringssl-a0899df79b3a63e606448c72d63a090d86bdb75b",
         )
 
     # RE2 regular-expression framework. Used by some unit-tests.
     if not native.existing_rule("com_googlesource_code_re2"):
         http_archive(
             name = "com_googlesource_code_re2",
-            urls = ["https://github.com/google/re2/archive/2020-06-01.tar.gz"],
-            sha256 = "fb8e0f4ed7a212e3420507f27933ef5a8c01aec70e5148c6a35313573269fae6",
-            strip_prefix = "re2-2020-06-01",
+            urls = ["https://github.com/google/re2/archive/2020-05-01.tar.gz"],
+            sha256 = "88864d7f5126bb17daa1aa8f41b05599aa6e3222e7b28a90e372db53c1c49aeb",
+            strip_prefix = "re2-2020-05-01",
         )
 
     # Required for Absl, Googletest, Protobuf.
     if not native.existing_rule("rules_cc"):
         http_archive(
             name = "rules_cc",
-            # Commit from 2020 June 03
-            urls = ["https://github.com/bazelbuild/rules_cc/archive/5cbd3dfbd1613f71ef29bbb7b10310b81e272975.tar.gz"],
-            sha256 = "ce19fea12ee666a0d399e6e15b5a77264f6da2b70f2759adea767c9a7f79b17c",
-            strip_prefix = "rules_cc-5cbd3dfbd1613f71ef29bbb7b10310b81e272975",
+            # Commit from 2020 May 13
+            urls = ["https://github.com/bazelbuild/rules_cc/archive/818289e5613731ae410efb54218a4077fb9dbb03.tar.gz"],
+            sha256 = "9d48151ea71b3e225adfb6867e6d2c7d0dce46cbdc8710d9a9a628574dfd40a0",
+            strip_prefix = "rules_cc-818289e5613731ae410efb54218a4077fb9dbb03",
         )
 
     # Required for Protobuf
@@ -228,61 +228,61 @@ def asylo_deps(toolchain_path = None):
     if not native.existing_rule("rules_proto"):
         http_archive(
             name = "rules_proto",
-            # Commit from 2020 June 03
-            urls = ["https://github.com/bazelbuild/rules_proto/archive/486aaf1808a15b87f1b6778be6d30a17a87e491a.tar.gz"],
-            sha256 = "dedb72afb9476b2f75da2f661a00d6ad27dfab5d97c0460cf3265894adfaf467",
-            strip_prefix = "rules_proto-486aaf1808a15b87f1b6778be6d30a17a87e491a",
+            # Commit from 2020 April 01
+            urls = ["https://github.com/bazelbuild/rules_proto/archive/8b81c3ccfdd0e915e46ffa888d3cdb6116db6fa5.tar.gz"],
+            sha256 = "6117a0f96af1d264747ea3f3f29b7b176831ed8acfd428e04f17c48534c83147",
+            strip_prefix = "rules_proto-8b81c3ccfdd0e915e46ffa888d3cdb6116db6fa5",
         )
 
     # Required for Protobuf.
     if not native.existing_rule("rules_python"):
         http_archive(
             name = "rules_python",
-            # Commit from 2020 June 25
-            urls = ["https://github.com/bazelbuild/rules_python/archive/cd552725122fdfe06a72864e21a92b5093a1857d.tar.gz"],
-            sha256 = "943071099515973b27e8139df8d2a2628404070a7e8782765b4fe1f12ab92033",
-            strip_prefix = "rules_python-cd552725122fdfe06a72864e21a92b5093a1857d",
+            # Commit from 2020 May 12
+            urls = ["https://github.com/bazelbuild/rules_python/archive/4fcc24fd8a850bdab2ef2e078b1de337eea751a6.tar.gz"],
+            sha256 = "d1a278f868355fb8a6ab94dbc3f4f717511000947939289caecf952340132469",
+            strip_prefix = "rules_python-4fcc24fd8a850bdab2ef2e078b1de337eea751a6",
         )
 
     # Absl for C++
     if not native.existing_rule("com_google_absl"):
         http_archive(
             name = "com_google_absl",
-            # Commit from 2020 June 24
+            # Commit from 2020 May 13
             urls = [
-                "https://github.com/abseil/abseil-cpp/archive/b86fff162e15ad8ee534c25e58bf522330e8376d.tar.gz",
+                "https://github.com/abseil/abseil-cpp/archive/f2bc9d11e841e247c95f9f1426b367721d0a8fa6.tar.gz",
             ],
-            sha256 = "f5fc6de9f5193afb5d5fcff9a7e07c858e1d764cf962c1a5fa90f03b800941af",
-            strip_prefix = "abseil-cpp-b86fff162e15ad8ee534c25e58bf522330e8376d",
+            sha256 = "2fd30fabb195ed977483638ace403438be290d2070003a6e6515cebaa22bb983",
+            strip_prefix = "abseil-cpp-f2bc9d11e841e247c95f9f1426b367721d0a8fa6",
         )
 
     # Protobuf
     if not native.existing_rule("com_google_protobuf"):
         http_archive(
             name = "com_google_protobuf",
-            strip_prefix = "protobuf-3.12.3",
-            urls = ["https://github.com/google/protobuf/archive/v3.12.3.tar.gz"],
-            sha256 = "71030a04aedf9f612d2991c1c552317038c3c5a2b578ac4745267a45e7037c29",
+            strip_prefix = "protobuf-3.11.4",
+            urls = ["https://github.com/google/protobuf/archive/v3.11.4.tar.gz"],
+            sha256 = "a79d19dcdf9139fa4b81206e318e33d245c4c9da1ffed21c87288ed4380426f9",
         )
 
     # gRPC
     if not native.existing_rule("com_github_grpc_grpc"):
         http_archive(
             name = "com_github_grpc_grpc",
-            urls = ["https://github.com/grpc/grpc/archive/v1.30.0.tar.gz"],
-            sha256 = "419dba362eaf8f1d36849ceee17c3e2ff8ff12ac666b42d3ff02a164ebe090e9",
-            patches = ["@com_google_asylo//asylo/distrib:grpc_1_30_0.patch"],
-            strip_prefix = "grpc-1.30.0",
+            urls = ["https://github.com/grpc/grpc/archive/v1.29.0.tar.gz"],
+            sha256 = "c0a6b40a222e51bea5c53090e9e65de46aee2d84c7fa7638f09cb68c3331b983",
+            patches = ["@com_google_asylo//asylo/distrib:grpc_1_29_0.patch"],
+            strip_prefix = "grpc-1.29.0",
         )
 
     # Google benchmark.
     if not native.existing_rule("com_github_google_benchmark"):
         http_archive(
             name = "com_github_google_benchmark",
-            # Commit from 2020 June 25
-            urls = ["https://github.com/google/benchmark/archive/39b6e703f8cdf87284db2aaca2f9b214f02e5673.zip"],
-            strip_prefix = "benchmark-39b6e703f8cdf87284db2aaca2f9b214f02e5673",
-            sha256 = "f0a74928b8e105fabeacc778bcfc5fd89cce68cbb664bfc2456373959d3e3b67",
+            # Commit from 2020 May 06
+            urls = ["https://github.com/google/benchmark/archive/d3ad0b9d11c190cb58de5fb17c3555def61fdc96.zip"],
+            strip_prefix = "benchmark-d3ad0b9d11c190cb58de5fb17c3555def61fdc96",
+            sha256 = "ce4147ea69a18d4efec6f649ec0f7628b363929be6a45a721f17d81a38ee8583",
         )
 
     # Google certificate transparency has a merkletree implementation.
@@ -402,8 +402,8 @@ go_library(
     visibility = ["//visibility:public"],
 )
 """,
-            # Commit from 2020 June 22
-            urls = ["https://github.com/golang/crypto/archive/75b288015ac94e66e3d6715fb68a9b41bf046ec2.tar.gz"],
-            sha256 = "be4aa9d8dacb05da3e69f5dda3f1ef5e1c2d1ace494625e3d779ad6b007a9565",
-            strip_prefix = "crypto-75b288015ac94e66e3d6715fb68a9b41bf046ec2",
+            # Commit from 2020 May 10
+            urls = ["https://github.com/golang/crypto/archive/06a226fb4e3765ef3f48aa2852b401bc7b98e981.tar.gz"],
+            sha256 = "be58fcd7737f95f05dbb63cdfced06f9a7c712bb54a8936f80be08867a45d5f7",
+            strip_prefix = "crypto-06a226fb4e3765ef3f48aa2852b401bc7b98e981",
         )

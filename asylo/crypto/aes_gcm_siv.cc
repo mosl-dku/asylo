@@ -1,6 +1,6 @@
 /*
  *
- * Copyright 2019 Asylo authors
+ * Copyright 2017 Asylo authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,25 @@
  *
  */
 
-#ifndef ASYLO_PLATFORM_PRIMITIVES_SGX_FORK_H_
-#define ASYLO_PLATFORM_PRIMITIVES_SGX_FORK_H_
+#include "asylo/crypto/aes_gcm_siv.h"
 
-#include <sys/types.h>
+#include <openssl/rand.h>
+#include <string>
+
+#include "absl/strings/str_cat.h"
+#include "asylo/crypto/util/bssl_util.h"
+#include "asylo/util/status.h"
 
 namespace asylo {
 
-int TakeSnapshot(char **output, size_t *output_len);
-
-int Restore(const char *snapshot_layout, size_t snapshot_layout_len,
-            char **output, size_t *output_len);
-
-int TransferSecureSnapshotKey(const char *input, size_t input_len,
-                              char **output, size_t *output_len);
-int InitiateMigration();
+Status AesGcmSivNonceGenerator::NextNonce(
+    const std::vector<uint8_t> &key_id,
+    AesGcmSivNonceGenerator::AesGcmSivNonce *nonce) {
+  if (RAND_bytes(nonce->data(), nonce->size()) != 1) {
+    return Status(error::GoogleError::INTERNAL,
+                  absl::StrCat("RAND_bytes failed", BsslLastErrorString()));
+  }
+  return Status::OkStatus();
+}
 
 }  // namespace asylo
-
-#endif  // ASYLO_PLATFORM_PRIMITIVES_SGX_FORK_H_

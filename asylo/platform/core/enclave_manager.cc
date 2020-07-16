@@ -103,7 +103,9 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
     finalize_status = client->EnterAndFinalize(final_input);
   }
 
-  Status status = client->DestroyEnclave();
+  Status status;
+  status = client->DestroyEnclave();
+  
   client->ReleaseMemory();
 
   absl::WriterMutexLock lock(&client_table_lock_);

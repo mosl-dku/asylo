@@ -261,7 +261,6 @@ int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
   if (!primitive_client) {
     return -1;
   }
-
   // A snapshot should be taken and restored for fork, take a snapshot of the
   // current enclave memory.
   asylo::SnapshotLayout snapshot_layout;
