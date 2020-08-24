@@ -673,16 +673,16 @@ Status RestoreForFork(const char *input, size_t input_len) {
       break;
     }
 
-    // Now that data is restored, the information of the thread and stack
-    // address of the calling thread can be retrieved. Decrypts the thread
+    // Decrypt and restore data, bss section and heap before restoring thread
     // information and stack.
-    Status status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
+    Status status = DecryptAndRestoreEnclaveDataBssHeap(
+        snapshot_layout, enclave_layout, snapshot_key);
     if (!status.ok()) {
       CopyNonOkStatus(status, &error_code, error_message,
                       ABSL_ARRAYSIZE(error_message));
       break;
     }
-    
+  
     // migration do not restore thread stacks
     if (!migration_requested) {
 	  // Now that data is restored, the information of the thread and stack

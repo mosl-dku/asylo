@@ -3646,7 +3646,7 @@ diff -Nur /dev/null BUILD
 +sgx.full_enclave_configuration(
 +    name = "enclave_debug_config",
 +    disable_debug = "0",
-+    heap_max_size = "0x2000000",
++    heap_max_size = "0x0100000",
 +    isvextprodid = "",
 +    isvfamilyid = "",
 +    isvsvn = "0",
