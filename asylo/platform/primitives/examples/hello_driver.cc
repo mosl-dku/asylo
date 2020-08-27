@@ -15,26 +15,31 @@
  * limitations under the License.
  *
  */
-#include <iostream>
+
 #include <string>
 
 #include "absl/flags/parse.h"
+#include "absl/strings/str_cat.h"
+#include "asylo/util/logging.h"
 #include "asylo/platform/primitives/examples/hello_enclave.h"
 #include "asylo/platform/primitives/extent.h"
 #include "asylo/platform/primitives/test/test_backend.h"
 #include "asylo/platform/primitives/untrusted_primitives.h"
 #include "asylo/platform/primitives/util/dispatch_table.h"
+#include "asylo/platform/primitives/util/message.h"
+#include "asylo/util/status.h"
+#include "asylo/util/status_macros.h"
 
 namespace asylo {
 namespace primitives {
 
-static constexpr char kHello[] = "Hello";
-
-// When the enclave asks for it, send "Hello"
+// When the enclave asks for it, send "Hello".
 Status hello_handler(std::shared_ptr<Client> client, void *context,
-                     NativeParameterStack *params) {
-  // Push our message on to the parameter stack to pass to the enclave
-  params->PushByCopy(Extent{const_cast<char *>(kHello), strlen(kHello)});
+                     MessageReader *in, MessageWriter *out) {
+  ASYLO_RETURN_IF_READER_NOT_EMPTY(*in);
+
+  // Push our message on to the MessageWriter to pass to the enclave
+  out->PushString("Hello");
   return Status::OkStatus();
 }
 
@@ -54,15 +59,18 @@ Status call_enclave() {
   auto status = client->exit_call_provider()->RegisterExitHandler(
       kExternalHelloHandler, ExitHandler{hello_handler});
 
-  NativeParameterStack params;
-  status = client->EnclaveCall(kHelloEnclaveSelector, &params);
-  if (status.ok()) {
-    auto span = params.Pop();
-    char *hello = reinterpret_cast<char *>(span->data());
-    std::cerr << hello << std::endl;
-  } else {
-    std::cerr << status.ToString() << std::endl;
+  MessageReader out;
+  ASYLO_RETURN_IF_ERROR(
+      client->EnclaveCall(kHelloEnclaveSelector, /*input=*/nullptr, &out));
+
+  if (out.size() != 1) {
+    return Status(error::GoogleError::INVALID_ARGUMENT,
+                  absl::StrCat("Incorrect output parameter count received."
+                               " Expecting 1, got: ",
+                               out.size()));
   }
+
+  LOG(INFO) << out.next().As<char>();
   return Status::OkStatus();
 }
 
@@ -72,6 +80,6 @@ Status call_enclave() {
 int main(int argc, char *argv[]) {
   absl::ParseCommandLine(argc, argv);
   auto status = ::asylo::primitives::call_enclave();
-  std::cout << status.ToString() << std::endl;
+  LOG_IF(ERROR, !status.ok()) << status;
   return 0;
 }

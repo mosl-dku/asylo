@@ -14,6 +14,11 @@
 # limitations under the License.
 #
 
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+load(":generate_end2end_tests.bzl", "grpc_end2end_tests")
+
 licenses(["notice"])  # Apache v2.0
 
 # Description:
@@ -23,9 +28,6 @@ package(
     default_visibility = ["//asylo/grpc/auth/test:__subpackages__"],
 )
 
-load(":generate_end2end_tests.bzl", "grpc_end2end_tests")
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
-
 # A binary that packages a test fixture for the enclave gRPC stack with the
 # gRPC end2end tests library.
 cc_binary(
@@ -34,15 +36,16 @@ cc_binary(
     srcs = ["h2_enclave_security_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
-        "//asylo:enclave_cc_proto",
         "//asylo/grpc/auth:enclave_credentials_options",
         "//asylo/grpc/auth:null_credentials_options",
         "//asylo/grpc/auth:sgx_local_credentials_options",
-        "//asylo/grpc/auth/core:enclave_credentials_options",
         "//asylo/grpc/auth/core:grpc_security_enclave",
-        "//asylo/grpc/auth/util:bridge_cpp_to_c",
         "//asylo/identity:enclave_assertion_authority_config_cc_proto",
+        "//asylo/identity:identity_acl_cc_proto",
         "//asylo/identity:init",
+        "//asylo/identity/platform/sgx:sgx_identity_cc_proto",
+        "//asylo/identity/platform/sgx:sgx_identity_util",
+        "//asylo/identity/platform/sgx/internal:fake_enclave",
         "//asylo/test/util:enclave_assertion_authority_configs",
         "@com_github_grpc_grpc//:gpr_base",
         "@com_github_grpc_grpc//:grpc_codegen",
@@ -56,9 +59,10 @@ cc_library(
     name = "mock_enclave_auth_context",
     testonly = 1,
     hdrs = ["mock_enclave_auth_context.h"],
-    visibility = ["//asylo:implementation"],
+    copts = ASYLO_DEFAULT_COPTS,
     deps = [
         "//asylo/grpc/auth:enclave_auth_context",
+        "//asylo/identity:identity_acl_cc_proto",
         "//asylo/identity:identity_cc_proto",
         "//asylo/util:status",
         "@com_google_googletest//:gtest",
@@ -73,3 +77,9 @@ cc_library(
 # See END2END_TESTS in generate_end2end_tests.bzl for the test names that are
 # supported.
 grpc_end2end_tests()
+
+bzl_library(
+    name = "generate_end2end_tests_bzl",
+    srcs = ["generate_end2end_tests.bzl"],
+    visibility = ["//asylo:implementation"],
+)

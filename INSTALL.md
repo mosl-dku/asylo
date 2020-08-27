@@ -22,12 +22,18 @@ git clone https://github.com/mosl-dku/asylo.git "${ASYLO}"/sdk
 
 The Asylo framework uses a custom toolchain to compile enclave applications for
 various backend environments. For example, to build your application for a
-simulated enclave backend, use the `enc-sim` config. We plan to support
-additional backends in the near future.
+simulated SGX enclave backend, use the `sgx-sim` config.
 
 ```bash
-bazel build --config=enc-sim :my_app
+bazel build --config=sgx-sim :my_app
 ```
+
+If using macros defined by `asylo.bzl` or `sgx_sdk.bzl`, then `--config=sgx-sim`
+*is not* the correct way to build your application. Those enclave/test/loader
+targets will instead directly transition to the Asylo toolchain and build with a
+number of supported enclave backends. A target defined by Asylo's
+backend-generic macros is given a suffix like `_sgx_sim` to denote which backend
+it uses.
 
 You can manually install the toolchain by following these steps:
 
@@ -62,14 +68,14 @@ You can manually install the toolchain by following these steps:
 
     This will install the toolchain under `"${ASYLO}"/toolchains/default`
 
-See [toolchain/README.md](asylo/distrib/toolchain/README.md) for additional
+See [toolchain/README.md](/asylo/distrib/toolchain/README.md) for additional
 details on installing the toolchain.
 
 ## Intel SGX SDK
 
 The Asylo framework uses
-[Intel SGX SDK v2.5](https://github.com/intel/linux-sgx/blob/sgx_2.5/README.md)
-with a [patch](asylo/distrib/sgx_x86_64/linux_sgx_2_5.patch) that backports some
+[Intel SGX SDK v2.8](https://github.com/intel/linux-sgx/blob/sgx_2.8/README.md)
+with a [patch](asylo/distrib/sgx_x86_64/linux_sgx_2_8.patch) that backports some
 pull requests and applies minor changes needed to build the SDK with the Asylo
 toolchain.
 

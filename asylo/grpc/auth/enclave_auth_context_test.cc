@@ -18,6 +18,8 @@
 
 #include "asylo/grpc/auth/enclave_auth_context.h"
 
+#include <string>
+
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/util/message_differencer.h>
 #include <gmock/gmock.h>
@@ -25,8 +27,13 @@
 #include "absl/memory/memory.h"
 #include "asylo/grpc/auth/core/enclave_grpc_security_constants.h"
 #include "asylo/grpc/auth/core/handshake.pb.h"
+#include "asylo/identity/identity.pb.h"
+#include "asylo/identity/named_identity_expectation_matcher.h"
+#include "asylo/platform/common/static_map.h"
 #include "asylo/test/util/proto_matchers.h"
 #include "asylo/test/util/status_matchers.h"
+#include "asylo/util/statusor.h"
+#include "asylo/util/status_macros.h"
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/security/context/security_context.h"
 #include "src/cpp/common/secure_auth_context.h"
@@ -35,8 +42,40 @@ namespace asylo {
 namespace {
 
 constexpr char kIdentity[] = "Identity";
+constexpr char kMatchSpec1[] = "Identity";
+constexpr char kMatchSpec2[] = "Foobar";
+constexpr char kIdentityMismatchError[] = "Identity != Match spec";
 constexpr char kAuthorityType1[] = "Good Authority";
 constexpr char kAuthorityType2[] = "Bad Authority";
+
+using ::testing::HasSubstr;
+using ::testing::IsEmpty;
+using ::testing::Not;
+
+class TestIdentityExpectationMatcher : public NamedIdentityExpectationMatcher {
+ public:
+  StatusOr<bool> MatchAndExplain(const EnclaveIdentity &identity,
+                                 const EnclaveIdentityExpectation &expectation,
+                                 std::string *explanation) const override {
+    if (identity.identity() != expectation.match_spec()) {
+      if (explanation != nullptr) {
+        *explanation = kIdentityMismatchError;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  EnclaveIdentityDescription Description() const override {
+    EnclaveIdentityDescription description;
+    description.set_identity_type(EnclaveIdentityType::CODE_IDENTITY);
+    description.set_authority_type(kAuthorityType1);
+    return description;
+  }
+};
+
+SET_STATIC_MAP_VALUE_OF_DERIVED_TYPE(IdentityExpectationMatcherMap,
+                                     TestIdentityExpectationMatcher);
 
 class EnclaveAuthContextTest : public ::testing::Test {
  protected:
@@ -60,7 +99,7 @@ class EnclaveAuthContextTest : public ::testing::Test {
 
     // Set default properties for a valid secure auth context.
     AddEnclaveIdentitiesProperty(identities_, secure_auth_context_.get());
-    AddRecordProtocolProperty(RecordProtocol::SEAL_AES128_GCM,
+    AddRecordProtocolProperty(RecordProtocol::ALTSRP_AES128_GCM,
                               secure_auth_context_.get());
     AddTransportSecurityTypeProperty(secure_auth_context_.get());
   }
@@ -120,7 +159,7 @@ TEST_F(EnclaveAuthContextTest, CreateSuccess) {
 TEST_F(EnclaveAuthContextTest, CreateFailsBadIdentityProto) {
   ::grpc::SecureAuthContext secure_auth_context(
       grpc_core::MakeRefCounted<grpc_auth_context>(/*chained=*/nullptr).get());
-  AddRecordProtocolProperty(RecordProtocol::SEAL_AES128_GCM,
+  AddRecordProtocolProperty(RecordProtocol::ALTSRP_AES128_GCM,
                             &secure_auth_context);
   AddTransportSecurityTypeProperty(&secure_auth_context);
 
@@ -129,9 +168,8 @@ TEST_F(EnclaveAuthContextTest, CreateFailsBadIdentityProto) {
   secure_auth_context.AddProperty(GRPC_ENCLAVE_IDENTITIES_PROTO_PROPERTY_NAME,
                                   "foobar");
 
-  EXPECT_THAT(
-      EnclaveAuthContext::CreateFromAuthContext(secure_auth_context).status(),
-      StatusIs(error::GoogleError::INVALID_ARGUMENT));
+  EXPECT_THAT(EnclaveAuthContext::CreateFromAuthContext(secure_auth_context),
+              StatusIs(error::GoogleError::INVALID_ARGUMENT));
 }
 
 // Verify that CreateFromAuthContext() fails when the auth context has an
@@ -139,7 +177,7 @@ TEST_F(EnclaveAuthContextTest, CreateFailsBadIdentityProto) {
 TEST_F(EnclaveAuthContextTest, CreateFailsBadTransportSecurityType) {
   ::grpc::SecureAuthContext secure_auth_context(
       grpc_core::MakeRefCounted<grpc_auth_context>(/*chained=*/nullptr).get());
-  AddRecordProtocolProperty(RecordProtocol::SEAL_AES128_GCM,
+  AddRecordProtocolProperty(RecordProtocol::ALTSRP_AES128_GCM,
                             &secure_auth_context);
   AddEnclaveIdentitiesProperty(identities_, &secure_auth_context);
 
@@ -147,9 +185,8 @@ TEST_F(EnclaveAuthContextTest, CreateFailsBadTransportSecurityType) {
   secure_auth_context.AddProperty(GRPC_TRANSPORT_SECURITY_TYPE_PROPERTY_NAME,
                                   "foobar");
 
-  EXPECT_THAT(
-      EnclaveAuthContext::CreateFromAuthContext(secure_auth_context).status(),
-      StatusIs(error::GoogleError::INVALID_ARGUMENT));
+  EXPECT_THAT(EnclaveAuthContext::CreateFromAuthContext(secure_auth_context),
+              StatusIs(error::GoogleError::INVALID_ARGUMENT));
 }
 
 // Verify that CreateFromAuthContext() fails when the auth context has an
@@ -158,9 +195,8 @@ TEST_F(EnclaveAuthContextTest, CreateFailsUnrecognizedAuthProperty) {
   // Add an unrecognized property.
   secure_auth_context_->AddProperty("foo property", "foobar");
 
-  EXPECT_THAT(
-      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_).status(),
-      StatusIs(error::GoogleError::INVALID_ARGUMENT));
+  EXPECT_THAT(EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_),
+              StatusIs(error::GoogleError::INVALID_ARGUMENT));
 }
 
 // Verify that CreateFromAuthContext() fails when the auth context does not
@@ -171,19 +207,17 @@ TEST_F(EnclaveAuthContextTest, CreateFailsPeerUnauthenticated) {
   ::grpc::SecureAuthContext secure_auth_context(
       grpc_core::MakeRefCounted<grpc_auth_context>(/*chained=*/nullptr).get());
 
-  EXPECT_THAT(
-      EnclaveAuthContext::CreateFromAuthContext(secure_auth_context).status(),
-      StatusIs(error::GoogleError::INVALID_ARGUMENT));
+  EXPECT_THAT(EnclaveAuthContext::CreateFromAuthContext(secure_auth_context),
+              StatusIs(error::GoogleError::INVALID_ARGUMENT));
 }
 
 // Verify that HasEnclaveIdentity() works as expected for identities that are
 // present in the peer and identities that are not present.
 TEST_F(EnclaveAuthContextTest, HasEnclaveIdentity) {
-  StatusOr<EnclaveAuthContext> auth_context_result =
-      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_);
-
-  ASSERT_THAT(auth_context_result, IsOk());
-  EnclaveAuthContext auth_context = auth_context_result.ValueOrDie();
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
 
   EXPECT_TRUE(auth_context.HasEnclaveIdentity(good_identity_description_));
   EXPECT_FALSE(auth_context.HasEnclaveIdentity(bad_identity_description_));
@@ -192,11 +226,10 @@ TEST_F(EnclaveAuthContextTest, HasEnclaveIdentity) {
 // Verify that FindEnclaveIdentity() retrieves an EnclaveIdentity when the
 // requested identity is present.
 TEST_F(EnclaveAuthContextTest, FindEnclaveIdentitySuccess) {
-  StatusOr<EnclaveAuthContext> auth_context_result =
-      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_);
-
-  ASSERT_THAT(auth_context_result, IsOk());
-  EnclaveAuthContext auth_context = auth_context_result.ValueOrDie();
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
 
   StatusOr<const EnclaveIdentity *> identity_result =
       auth_context.FindEnclaveIdentity(good_identity_description_);
@@ -210,29 +243,121 @@ TEST_F(EnclaveAuthContextTest, FindEnclaveIdentitySuccess) {
 // Verify that FindEnclaveIdentity() returns NOT_FOUND if the requested
 // EnclaveIdentity is not present.
 TEST_F(EnclaveAuthContextTest, FindEnclaveIdentityNotFound) {
-  StatusOr<EnclaveAuthContext> auth_context_result =
-      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_);
-
-  ASSERT_THAT(auth_context_result, IsOk());
-  EnclaveAuthContext auth_context = auth_context_result.ValueOrDie();
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
 
   StatusOr<const EnclaveIdentity *> identity_result =
       auth_context.FindEnclaveIdentity(bad_identity_description_);
 
-  EXPECT_THAT(
-      auth_context.FindEnclaveIdentity(bad_identity_description_).status(),
-      StatusIs(error::GoogleError::NOT_FOUND));
+  EXPECT_THAT(auth_context.FindEnclaveIdentity(bad_identity_description_),
+              StatusIs(error::GoogleError::NOT_FOUND));
 }
 
 // Verify that GetRecordProtocol() returns the record protocol.
 TEST_F(EnclaveAuthContextTest, GetRecordProtocol) {
-  StatusOr<EnclaveAuthContext> auth_context_result =
-      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_);
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
 
-  ASSERT_THAT(auth_context_result, IsOk());
-  EnclaveAuthContext auth_context = auth_context_result.ValueOrDie();
+  EXPECT_EQ(auth_context.GetRecordProtocol(),
+            RecordProtocol::ALTSRP_AES128_GCM);
+}
 
-  EXPECT_EQ(auth_context.GetRecordProtocol(), RecordProtocol::SEAL_AES128_GCM);
+// Verify that EvaluateAcl() returns a non-OK Status when there is an error in
+// ACL evaluation.
+TEST_F(EnclaveAuthContextTest, EvaluateAclError) {
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
+
+  // No IdentityExpectationMatcher exists for |bad_identity_description_|.
+  IdentityAclPredicate acl;
+  EnclaveIdentityExpectation *expectation = acl.mutable_expectation();
+  *expectation->mutable_reference_identity()->mutable_description() =
+      bad_identity_description_;
+  expectation->set_match_spec(kMatchSpec1);
+
+  // Test the IdentityAclPredicate overload.
+  {
+    std::string explanation;
+    ASSERT_THAT(auth_context.EvaluateAcl(acl, &explanation), Not(IsOk()));
+    EXPECT_THAT(explanation, IsEmpty());
+  }
+
+  // Test the EnclaveIdentityExpectation overload.
+  {
+    std::string explanation;
+    ASSERT_THAT(auth_context.EvaluateAcl(acl.expectation(), &explanation),
+                Not(IsOk()));
+    EXPECT_THAT(explanation, IsEmpty());
+  }
+}
+
+// Verify that EvaluateAcl() returns false and populates the explanation string
+// when the peer's identities do not match the ACL.
+TEST_F(EnclaveAuthContextTest, EvaluateAclFailure) {
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
+
+  // The ACL does not match the peer's identities.
+  IdentityAclPredicate acl;
+  EnclaveIdentityExpectation *expectation = acl.mutable_expectation();
+  *expectation->mutable_reference_identity()->mutable_description() =
+      good_identity_description_;
+  expectation->set_match_spec(kMatchSpec2);
+
+  // Test the IdentityAclPredicate overload.
+  {
+    std::string explanation;
+    ASSERT_THAT(auth_context.EvaluateAcl(acl, &explanation),
+                IsOkAndHolds(false));
+    EXPECT_THAT(explanation, HasSubstr(kIdentityMismatchError));
+  }
+
+  // Test the EnclaveIdentityExpectation overload.
+  {
+    std::string explanation;
+    ASSERT_THAT(auth_context.EvaluateAcl(acl.expectation(), &explanation),
+                IsOkAndHolds(false));
+    EXPECT_THAT(explanation, HasSubstr(kIdentityMismatchError));
+  }
+}
+
+// Verify that EvaluateAcl() returns true when the ACL passes.
+TEST_F(EnclaveAuthContextTest, EvaluateAclSuccess) {
+  EnclaveAuthContext auth_context;
+  ASYLO_ASSERT_OK_AND_ASSIGN(
+      auth_context,
+      EnclaveAuthContext::CreateFromAuthContext(*secure_auth_context_));
+
+  // The ACL matches the client's identities.
+  IdentityAclPredicate acl;
+  EnclaveIdentityExpectation *expectation = acl.mutable_expectation();
+  *expectation->mutable_reference_identity()->mutable_description() =
+      good_identity_description_;
+  expectation->set_match_spec(kMatchSpec1);
+
+  // Test the IdentityAclPredicate overload.
+  {
+    std::string explanation;
+    ASSERT_THAT(auth_context.EvaluateAcl(acl, &explanation),
+                IsOkAndHolds(true));
+    EXPECT_THAT(explanation, IsEmpty());
+  }
+
+  // Test the EnclaveIdentityExpectation overload.
+  {
+    std::string explanation;
+    ASSERT_THAT(auth_context.EvaluateAcl(acl.expectation(), &explanation),
+                IsOkAndHolds(true));
+    EXPECT_THAT(explanation, IsEmpty());
+  }
 }
 
 }  // namespace

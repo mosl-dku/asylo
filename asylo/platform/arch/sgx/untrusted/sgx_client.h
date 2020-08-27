@@ -23,60 +23,14 @@
 
 #include "absl/base/macros.h"
 #include "asylo/enclave.pb.h"
-#include "asylo/platform/arch/fork.pb.h"
 #include "asylo/platform/core/enclave_manager.h"
-#include "asylo/platform/core/generic_enclave_client.h"
-#include "asylo/platform/primitives/sgx/untrusted_sgx.h"
-#include "asylo/util/status.h"
-#include "asylo/util/statusor.h"
-#include "include/sgx_urts.h"
 
 namespace asylo {
 
-/// Enclave client for Intel Software Guard Extensions (SGX) based enclaves.
-class SgxClient : public GenericEnclaveClient {
- public:
-  SgxClient() = delete;
-
-  explicit SgxClient(const std::string &name) : GenericEnclaveClient(name) {}
-
-  // Returns true when a TCS is active in simulation mode. Always returns false
-  // in hardware mode, since TCS active/inactive state is only set and used in
-  // simulation mode.
-  bool IsTcsActive();
-
-  void *base_address() { return primitive_sgx_client_->GetBaseAddress(); }
-
-  const void *base_address() const {
-    return primitive_sgx_client_->GetBaseAddress();
-  }
-
-  size_t size() { return primitive_sgx_client_->GetEnclaveSize(); }
-
-  // Sets a new expected process ID for an existing SGX enclave.
-  void SetProcessId();
-
-  // Returns the primitive SGX client.
-  std::shared_ptr<primitives::SgxEnclaveClient> GetPrimitivesClient() {
-    return primitive_sgx_client_;
-  }
-  Status EnterAndTakeSnapshot(SnapshotLayout *snapshot_layout);
-  Status EnterAndRestore(const SnapshotLayout &snapshot_layout);
-  Status EnterAndTransferSecureSnapshotKey(
-      const ForkHandshakeConfig &fork_handshake_config);
-
- private:
-  friend class SgxLoader;
-  friend class SgxEmbeddedLoader;
-
-  Status EnterAndHandleSignal(const EnclaveSignal &signal) override;
-
-  // Primitive SGX client.
-  std::shared_ptr<primitives::SgxEnclaveClient> primitive_sgx_client_;
-};
-
 /// Enclave loader for Intel Software Guard Extensions (SGX) based enclaves
 /// located in shared object files read from the file system.
+/// \deprecated Use EnclaveLoadConfig directly instead of this loader, or use
+///             LoadEnclave from EnclaveManager.
 class SgxLoader : public EnclaveLoader {
  public:
   /// Constructs an SgxLoader for an enclave object file on the file system,
@@ -84,15 +38,11 @@ class SgxLoader : public EnclaveLoader {
   ///
   /// \param path The path to the enclave binary (.so) file to load.
   /// \param debug Whether to load the enclave in debug mode.
-  SgxLoader(const std::string &path, bool debug)
+  SgxLoader(absl::string_view path, bool debug)
       : enclave_path_(path), debug_(debug) {}
 
  private:
-  StatusOr<std::unique_ptr<EnclaveClient>> LoadEnclave(
-      const std::string &name, void *base_address, const size_t enclave_size,
-      const EnclaveConfig &config) const override;
-
-  StatusOr<std::unique_ptr<EnclaveLoader>> Copy() const override;
+  EnclaveLoadConfig GetEnclaveLoadConfig() const override;
 
   const std::string enclave_path_;
   const bool debug_;
@@ -100,6 +50,8 @@ class SgxLoader : public EnclaveLoader {
 
 /// Enclave loader for Intel Software Guard Extensions (SGX) based enclaves
 /// embedded in the binary of the calling process.
+/// \deprecated Use EnclaveLoadConfig directly instead of this loader, or use
+///             LoadEnclave from EnclaveManager.
 class SgxEmbeddedLoader : public EnclaveLoader {
  public:
   /// Constructs an SgxEmbeddedLoader for an enclave object embedded in the
@@ -108,39 +60,15 @@ class SgxEmbeddedLoader : public EnclaveLoader {
   /// \param elf_section_name The name of the ELF section containing the
   ///                         enclave.
   /// \param debug Whether to load the enclave in debug mode.
-  SgxEmbeddedLoader(const std::string &elf_section_name, bool debug)
+  SgxEmbeddedLoader(absl::string_view elf_section_name, bool debug)
       : section_name_(elf_section_name), debug_(debug) {}
 
  private:
-  StatusOr<std::unique_ptr<EnclaveClient>> LoadEnclave(
-      const std::string &name, void *base_address, const size_t enclave_size,
-      const EnclaveConfig &config) const override;
-
-  StatusOr<std::unique_ptr<EnclaveLoader>> Copy() const override;
+  EnclaveLoadConfig GetEnclaveLoadConfig() const override;
 
   const std::string section_name_;
   const bool debug_;
 };
-
-/// SgxClient alias for backwards compatibility.
-using SGXClient ABSL_DEPRECATED("Use SgxClient instead") = SgxClient;
-
-/// SgxLoader alias for backwards compatibility.
-using SGXLoader ABSL_DEPRECATED("Use SgxLoader instead") = SgxLoader;
-
-/// Whole-file enclave loader for simulated enclaves.
-///
-/// Enclave simulation currently uses the same binary format as SGX enclaves.
-/// However, this is subject to change and consumers of this API should not
-/// make assumptions about it being related to SGX.
-using SimLoader = SgxLoader;
-
-/// Embedded enclave loader for simulated enclaves.
-///
-/// Enclave simulation currently uses the same binary format as SGX enclaves.
-/// However, this is subject to change and consumers of this API should not
-/// make assumptions about it being related to SGX.
-using SimEmbeddedLoader = SgxEmbeddedLoader;
 
 }  //  namespace asylo
 #endif  // ASYLO_PLATFORM_ARCH_SGX_UNTRUSTED_SGX_CLIENT_H_

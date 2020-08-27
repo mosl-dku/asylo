@@ -14,9 +14,10 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = [
@@ -28,13 +29,12 @@ cc_library(
     name = "signal_manager",
     srcs = ["signal_manager.cc"],
     hdrs = ["signal_manager.h"],
-    copts = ASYLO_DEFAULT_COPTS,
+    copts = ASYLO_DEFAULT_COPTS + ["-faligned-new"],
     deps = [
+        "//asylo/platform/core:trusted_spin_lock",
+        "//asylo/util:lock_guard",
         "//asylo/util:status",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
     ],
 )

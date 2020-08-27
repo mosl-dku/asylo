@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#include "asylo/platform/primitives/sgx/generated_bridge_t.h"
 #include "include/sgx_thread.h"
 #include "include/sgx_trts.h"
 
@@ -68,6 +69,18 @@ void *enclave_sbrk(intptr_t increment) {
   return reinterpret_cast<void *>(prev_heap_end);
 }
 
+void enc_exit(int rc) {
+  ocall_enc_untrusted__exit(rc);
+}
+
+void enc_update_pthread_info(void *pthread_info) {
+  if (pthread_info) {
+    auto thread_data =
+        reinterpret_cast<struct __pthread_info *>(enc_thread_self());
+    *thread_data = *reinterpret_cast<struct __pthread_info *>(pthread_info);
+  }
+}
+
 // The SGX SDK function sgx_thread_self() returns nullptr during early
 // initialization. To return a non-zero, distinct value for each thread and
 // satisfy the specification of enc_thread_self(), return the address of a
@@ -75,26 +88,23 @@ void *enclave_sbrk(intptr_t increment) {
 // instance of this variable, and all instances are in the same address space,
 // this guarantees a distinct non-zero value is provisioned to each thread.
 uint64_t enc_thread_self() {
-  static thread_local int thread_identity;
+  static thread_local struct __pthread_info thread_identity = {0, nullptr, 0, 0,
+                                                               nullptr};
   return reinterpret_cast<uint64_t>(&thread_identity);
 }
 
-bool enc_is_within_enclave(void const *address, size_t size) {
-  return sgx_is_within_enclave(address, size) == 1;
-}
+void enc_block_entries() { sgx_block_entries(); }
 
-bool enc_is_outside_enclave(void const *address, size_t size) {
-  return sgx_is_outside_enclave(address, size) == 1;
-}
+void enc_unblock_entries() { sgx_unblock_entries(); }
 
-void enc_block_ecalls() { sgx_block_ecalls(); }
-
-void enc_unblock_ecalls() { sgx_unblock_ecalls(); }
+void enc_reject_entries() { sgx_reject_entries(); }
 
 void enc_get_memory_layout(struct EnclaveMemoryLayout *enclave_memory_layout) {
   if (!enclave_memory_layout) return;
   struct SgxMemoryLayout memory_layout;
   sgx_memory_layout(&memory_layout);
+  enclave_memory_layout->base = memory_layout.base;
+  enclave_memory_layout->size = memory_layout.size;
   enclave_memory_layout->data_base = memory_layout.data_base;
   enclave_memory_layout->data_size = memory_layout.data_size;
   enclave_memory_layout->bss_base = memory_layout.bss_base;
@@ -113,6 +123,10 @@ void enc_get_memory_layout(struct EnclaveMemoryLayout *enclave_memory_layout) {
   enclave_memory_layout->reserved_heap_size = memory_layout.reserved_heap_size;
 }
 
-int get_active_enclave_entries() { return sgx_get_active_enclave_entries(); }
+int active_entry_count() { return sgx_active_entry_count(); }
+
+int active_exit_count() { return sgx_active_exit_count(); }
+
+int blocked_entry_count() { return sgx_blocked_entry_count(); }
 
 }  //  extern "C"

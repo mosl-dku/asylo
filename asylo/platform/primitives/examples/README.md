@@ -6,22 +6,16 @@ A hello world enclave using the enclave primitives.
 
 To build the hello_enclave:
 
-`bazel build :hello_sim_enclave.so --config=asylo --define=ASYLO_SIM=1`
-
-The `--config=asylo` flag selects our enclave cross compiler toolchain, which
-builds code to run inside enclaves.
-
-The `--define=ASYLO_SIM=1` flag lets the build know which Asylo backend to use.
-In this case it selects the simulator.
+`bazel build :hello_dlopen_enclave.so`
 
 To build the hello_driver program:
 
-`bazel build :hello_sim_driver --define=ASYLO_SIM=1`
+`bazel build :hello_dlopen_driver`
 
 To run the program, invoke the driver binary (from bazel-bin), and pass in the
 path to the enclave:
 
-`` `bazel info
-bazel-bin`/third_party/asylo/platform/primitives/examples/hello_sim_driver
---enclave_path=`bazel info --config=asylo
-bazel-bin`/third_party/asylo/platform/primitives/examples/hello_sim_enclave_simulated.so``
+```bash
+$(bazel info bazel-bin)/asylo/platform/primitives/examples/hello_dlopen_driver \
+  --enclave_path="$(bazel info bazel-bin)/asylo/platform/primitives/examples/hello_dlopen_enclave.so"
+```

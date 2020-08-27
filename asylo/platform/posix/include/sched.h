@@ -27,8 +27,13 @@
 extern "C" {
 #endif
 
-// The maximum number of CPUs we support. Should match BRIDGE_CPU_SET_MAX_CPUS
-// in third_party/asylo/platform/common/bridge_types.h.
+// The clone flags used in clone(2). Currently only creating a thread through
+// clone(2) is supported. Please use fork(2) for cloning a process.
+#define CLONE_THREAD 0x10000
+#define CLONE_SETTLS 0x80000
+
+// The maximum number of CPUs we support. Should match KLINUX_CPU_SET_MAX_CPUS
+// in asylo/platform/system_call/type_conversions/kernel_types.h.
 #define CPU_SETSIZE CPU_SET_MAX_CPUS
 
 // Represents a set of (up to) CPU_SETSIZE CPUs as a bitset.
@@ -53,8 +58,12 @@ typedef CpuSet cpu_set_t;
 // translates that to the enclave's cpu_set_t type (defined above).
 int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
 
+int sched_setaffinity(pid_t pid, size_t cpusetsize, const cpu_set_t *cpuset);
+
 // Implemented as call to host sched_yield().
 int sched_yield(void);
+
+int sched_getcpu(void);
 
 #ifdef __cplusplus
 }  // extern "C"

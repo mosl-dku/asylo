@@ -18,15 +18,15 @@
 
 #include "asylo/platform/posix/io/secure_paths.h"
 
-#include <sys/ioctl.h>
 #include <cerrno>
 #include <cstdint>
 
-#include "asylo/platform/arch/include/trusted/host_calls.h"
 #include "asylo/platform/crypto/gcmlib/gcm_cryptor.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 #include "asylo/platform/posix/io/io_manager.h"
 #include "asylo/platform/storage/secure/aead_handler.h"
 #include "asylo/platform/storage/secure/enclave_storage_secure.h"
+#include "asylo/secure_storage.h"
 
 using asylo::platform::crypto::gcmlib::kKeyLength;
 using asylo::platform::storage::AeadHandler;
@@ -66,7 +66,11 @@ int IOContextSecure::Ioctl(int request, void *argp) {
           host_fd_, ioctl_param->data, ioctl_param->length);
     }
     default:
-      errno = ENOSYS;
+      if (argp != nullptr) {
+        errno = ENOSYS;
+        return -1;
+      }
+      return enc_untrusted_ioctl1(host_fd_, request);
   }
 
   return -1;

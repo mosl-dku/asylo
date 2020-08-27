@@ -18,6 +18,7 @@
 
 #include "asylo/platform/system_call/untrusted_invoke.h"
 
+#include <errno.h>
 #include <unistd.h>
 
 #include <array>
@@ -31,9 +32,8 @@
 namespace asylo {
 namespace system_call {
 
-primitives::PrimitiveStatus UntrustedInvoke(
-    primitives::Extent request, primitives::Extent *response,
-    const primitives::ExtentAllocator &response_allocator) {
+primitives::PrimitiveStatus UntrustedInvoke(primitives::Extent request,
+                                            primitives::Extent *response) {
   MessageReader reader(request);
   SystemCallDescriptor descriptor(reader.sysno());
 
@@ -58,11 +58,12 @@ primitives::PrimitiveStatus UntrustedInvoke(
       size_t size;
       if (parameter.is_bounded()) {
         int bounding_index = parameter.bounding_parameter().index();
-        size = reader.parameter<size_t>(bounding_index);
+        size =
+            reader.parameter<size_t>(bounding_index) * parameter.element_size();
       } else {
         size = parameter.size();
       }
-      output_buffers.emplace_back(new char[size]);
+      output_buffers.emplace_back(new char[size]());
       params[i] = reinterpret_cast<uint64_t>(output_buffers.back().get());
     }
   }
@@ -72,8 +73,7 @@ primitives::PrimitiveStatus UntrustedInvoke(
                             params[3], params[4], params[5]);
 
   // Build the response message.
-  return SerializeResponse(reader.sysno(), result, params, response,
-                           response_allocator);
+  return SerializeResponse(reader.sysno(), result, errno, params, response);
 }
 
 }  // namespace system_call

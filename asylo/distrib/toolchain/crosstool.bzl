@@ -16,6 +16,7 @@
 
 """Defines the Asylo toolchain CROSSTOOL"""
 
+load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
 load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
     "action_config",
@@ -28,7 +29,6 @@ load(
     "variable_with_value",
     "with_feature_set",
 )
-load("@bazel_tools//tools/build_defs/cc:action_names.bzl", "ACTION_NAMES")
 
 def _get_tools(compiler):
     if compiler == "gcc":
@@ -102,7 +102,7 @@ def _impl(ctx):
     else:
         fail("Unreachable")
 
-    host_system_name = "x86_64-grtev4-linux-gnu"
+    host_system_name = "x86_64-local-linux-gnu"
 
     target_system_name = "x86_64-newlib-asylo"
 
@@ -616,8 +616,6 @@ def _impl(ctx):
                             "-D__ASYLO__",
                             "-DCOMPILER_GCC3",
                             "-D__LINUX_ERRNO_EXTENSIONS__",
-                            "-D_GLIBCXX_USE_C99",  # DEPRECATED: To be removed.
-                            "-D_GNU_SOURCE=1",  # DEPRECATED: To be removed.
                         ],
                     ),
                 ],
@@ -655,7 +653,6 @@ def _impl(ctx):
                     flag_group(
                         flags = [
                             "-g0",
-                            "-fdebug-types-section",
                             "-O2",
                             "-DNDEBUG",
                             "-ffunction-sections",
@@ -676,7 +673,7 @@ def _impl(ctx):
                     ACTION_NAMES.lto_backend,
                     ACTION_NAMES.clif_match,
                 ],
-                flag_groups = [flag_group(flags = ["-std=gnu++11"])],
+                flag_groups = [flag_group(flags = ["-std=gnu++17"])],
             ),
         ],
     )
@@ -1396,6 +1393,71 @@ def _impl(ctx):
     dynamic_linking_mode_feature = feature(name = "dynamic_linking_mode")
     mostly_static_linking_mode_feature = feature(name = "mostly_static_linking_mode")
 
+    # Features to specify various levels of LVI mitgation, as provided by Intel.
+    # https://software.intel.com/security-software-guidance/insights/deep-dive-load-value-injection#applysgxmitigation
+    lvi_all_loads_mitigation_feature = feature(
+        name = "lvi_all_loads_mitigation",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-mindirect-branch-register",
+                            "-mfunction-return=thunk-inline",
+                            "-Wa,-mlfence-before-ret=not",
+                            "-Wa,-mlfence-after-load=yes",
+                            "-fno-plt",
+                        ],
+                    ),
+                ],
+            ),
+        ],
+        provides = ["lvi_mitigation"],
+    )
+
+    lvi_control_flow_mitigation_feature = feature(
+        name = "lvi_control_flow_mitigation",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-mindirect-branch-register",
+                            "-mfunction-return=thunk-inline",
+                            "-Wa,-mlfence-before-ret=not",
+                            "-Wa,-mlfence-before-indirect-branch=register",
+                            "-fno-plt",
+                        ],
+                    ),
+                ],
+            ),
+        ],
+        provides = ["lvi_mitigation"],
+    )
+
+    lvi_no_auto_mitigation_feature = feature(
+        name = "lvi_no_auto_mitigation",
+        provides = ["lvi_mitigation"],
+    )
+
     features = [
         no_legacy_features_feature,
         has_configured_linker_path_feature,
@@ -1438,6 +1500,9 @@ def _impl(ctx):
         static_linking_mode_feature,
         dynamic_linking_mode_feature,
         mostly_static_linking_mode_feature,
+        lvi_all_loads_mitigation_feature,
+        lvi_control_flow_mitigation_feature,
+        lvi_no_auto_mitigation_feature,
     ]
 
     cxx_builtin_include_directories = _get_include_directories(compiler)

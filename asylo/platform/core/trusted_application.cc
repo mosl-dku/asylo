@@ -26,273 +26,137 @@
 #include <cstdlib>
 #include <functional>
 #include <string>
+#include <utility>
 
 #include "absl/memory/memory.h"
-#include "absl/strings/str_cat.h"
-#include "absl/synchronization/mutex.h"
 #include "asylo/util/logging.h"
 #include "asylo/identity/init.h"
-#include "asylo/platform/arch/include/trusted/fork.h"
-#include "asylo/platform/arch/include/trusted/host_calls.h"
-#include "asylo/platform/arch/include/trusted/time.h"
-#include "asylo/platform/common/bridge_functions.h"
+#include "asylo/platform/common/enclave_state.h"
 #include "asylo/platform/core/entry_selectors.h"
 #include "asylo/platform/core/shared_name_kind.h"
 #include "asylo/platform/core/trusted_global_state.h"
-#include "asylo/platform/core/untrusted_cache_malloc.h"
 #include "asylo/platform/posix/io/io_manager.h"
 #include "asylo/platform/posix/io/native_paths.h"
 #include "asylo/platform/posix/io/random_devices.h"
-#include "asylo/platform/posix/signal/signal_manager.h"
 #include "asylo/platform/posix/threading/thread_manager.h"
 #include "asylo/platform/primitives/extent.h"
 #include "asylo/platform/primitives/primitive_status.h"
 #include "asylo/platform/primitives/trusted_primitives.h"
 #include "asylo/platform/primitives/trusted_runtime.h"
+#include "asylo/platform/primitives/util/message.h"
 #include "asylo/platform/primitives/util/status_conversions.h"
+#include "asylo/platform/primitives/util/status_serializer.h"
 #include "asylo/util/posix_error_space.h"
 #include "asylo/util/status.h"
 #include "asylo/util/status_macros.h"
 
-using asylo::primitives::Extent;
-using asylo::primitives::EntryHandler;
-using asylo::primitives::MakePrimitiveStatus;
-using asylo::primitives::PrimitiveStatus;
-using asylo::primitives::TrustedParameterStack;
-using asylo::primitives::TrustedPrimitives;
-using EnclaveState = ::asylo::TrustedApplication::State;
+using ::asylo::primitives::EntryHandler;
+using ::asylo::primitives::Extent;
+using ::asylo::primitives::MessageReader;
+using ::asylo::primitives::MessageWriter;
+using ::asylo::primitives::PrimitiveStatus;
+using ::asylo::primitives::TrustedPrimitives;
 using google::protobuf::RepeatedPtrField;
 
 namespace asylo {
 namespace {
 
 void LogError(const Status &status) {
-  EnclaveState state = GetApplicationInstance()->GetState();
+  EnclaveState state = GetState();
   if (state < EnclaveState::kUserInitializing) {
     // LOG() is unavailable here because the I/O subsystem has not yet been
     // initialized.
-    enc_untrusted_puts(status.ToString().c_str());
+    TrustedPrimitives::DebugPuts(status.ToString().c_str());
   } else {
     LOG(ERROR) << status;
   }
 }
 
-// StatusSerializer can be used to serialize a given proto2 message to an
-// untrusted buffer.
-//
-// OutputProto must be a proto2 message type.
-template <class OutputProto>
-class StatusSerializer {
- public:
-  // Creates a new StatusSerializer that saves Status objects to |status_proto|,
-  // which is a nested message within |output_proto|. StatusSerializer does not
-  // take ownership of any of the input pointers. Input pointers must remain
-  // valid for the lifetime of the StatusSerializer.
-  StatusSerializer(const OutputProto *output_proto, StatusProto *status_proto,
-                   char **output, size_t *output_len)
-      : output_proto_{output_proto},
-        status_proto_{status_proto},
-        output_{output},
-        output_len_{output_len},
-        custom_allocator_{nullptr} {}
-
-  // Creates a new StatusSerializer that saves Status objects to |status_proto|.
-  // StatusSerializer does not take ownership of any of the input pointers.
-  // Input pointers must remain valid for the lifetime of the StatusSerializer.
-  StatusSerializer(char **output, size_t *output_len)
-      : output_proto_{&proto},
-        status_proto_{&proto},
-        output_{output},
-        output_len_{output_len},
-        custom_allocator_{nullptr} {}
-
-  // Creates a new StatusSerializer that saves Status objects to |status_proto|.
-  // The output buffer is created by |custom_allocator_| allocator.
-  // StatusSerializer does not take ownership of any of the input pointers.
-  // Input pointers must remain valid for the lifetime of the StatusSerializer.
-  StatusSerializer(const OutputProto *output_proto, StatusProto *status_proto,
-                   char **output, size_t *output_len,
-                   std::function<void *(size_t)> allocator)
-      : output_proto_{output_proto},
-        status_proto_{status_proto},
-        output_{output},
-        output_len_{output_len},
-        custom_allocator_{allocator} {}
-
-  // Saves the given |status| into the StatusSerializer's status_proto_. Then
-  // serializes its output_proto_ into a buffer. On success 0 is returned, else
-  // 1 is returned and the StatusSerializer logs the error.
-  int Serialize(const Status &status) {
-    status.SaveTo(status_proto_);
-
-    // Serialize to a trusted buffer instead of an untrusted buffer because the
-    // serialization routine may rely on read backs for correctness.
-    *output_len_ = output_proto_->ByteSizeLong();
-    std::unique_ptr<char[]> trusted_output(new char[*output_len_]);
-    if (!output_proto_->SerializeToArray(trusted_output.get(), *output_len_)) {
-      *output_ = nullptr;
-      *output_len_ = 0;
-      LogError(status);
-      return 1;
-    }
-
-    // Use the custom allocator if specified.
-    if (custom_allocator_) {
-      *output_ = reinterpret_cast<char *>(custom_allocator_(*output_len_));
-    } else {
-      // Instance of the global memory pool singleton.
-      asylo::UntrustedCacheMalloc *untrusted_cache_malloc =
-          asylo::UntrustedCacheMalloc::Instance();
-      *output_ = reinterpret_cast<char *>(
-          untrusted_cache_malloc->Malloc(*output_len_));
-    }
-    memcpy(*output_, trusted_output.get(), *output_len_);
-    return 0;
+// Validates that the address-range [|address|, |address| + |size|) is fully
+// contained in enclave trusted memory.
+PrimitiveStatus VerifyTrustedAddressRange(void *address, size_t size) {
+  if (!TrustedPrimitives::IsInsideEnclave(address, size)) {
+    return PrimitiveStatus(
+        error::GoogleError::INVALID_ARGUMENT,
+        "Unexpected reference to resource outside the enclave trusted memory.");
   }
-
- private:
-  OutputProto proto;
-  const OutputProto *output_proto_;
-  StatusProto *status_proto_;
-  char **output_;
-  size_t *output_len_;
-  std::function<void *(size_t)> custom_allocator_;
-};
-
-// Validates that the address-range [|address|, |address| +|size|) is fully
-// contained outside of the enclave.
-Status VerifyUntrustedAddressRange(void *address, size_t size) {
-  if (!enc_is_outside_enclave(address, size)) {
-    return Status(error::GoogleError::INVALID_ARGUMENT,
-        "Unexpected reference to resource inside the enclave.");
-  }
-  return Status::OkStatus();
+  return PrimitiveStatus::OkStatus();
 }
 
 // Handler installed by the runtime to initialize the enclave.
-PrimitiveStatus Initialize(void *context, TrustedParameterStack *params) {
-  ASYLO_RETURN_IF_INCORRECT_ARGUMENTS(params, 2);
-  TrustedParameterStack::ExtentPtr input_extent = params->Pop();
-  TrustedParameterStack::ExtentPtr name_extent = params->Pop();
+PrimitiveStatus Initialize(void *context, MessageReader *in,
+                           MessageWriter *out) {
+  ASYLO_RETURN_IF_INCORRECT_READER_ARGUMENTS(*in, 2);
+  auto input_extent = in->next();
+  auto name_extent = in->next();
 
-  size_t input_len = input_extent->size();
-  ASYLO_RETURN_IF_ERROR(MakePrimitiveStatus(
-      VerifyUntrustedAddressRange(input_extent->data(), input_len)));
-  std::unique_ptr<char[]> input(new char[input_len]);
-  input_extent->CopyTo(input.get());
+  ASYLO_RETURN_IF_ERROR(
+      VerifyTrustedAddressRange(input_extent.data(), input_extent.size()));
 
-  size_t name_len = name_extent->size();
-  ASYLO_RETURN_IF_ERROR(MakePrimitiveStatus(
-      VerifyUntrustedAddressRange(name_extent->data(), name_len)));
-  std::unique_ptr<char[]> name(new char[name_len]);
-  name_extent->CopyTo(name.get());
+  ASYLO_RETURN_IF_ERROR(
+      VerifyTrustedAddressRange(name_extent.data(), name_extent.size()));
 
   char *output = nullptr;
   size_t output_len = 0;
   int result = 0;
   try {
-    result = asylo::__asylo_user_init(name.get(), /*config=*/input.get(),
-                                      /*config_len=*/input_len, &output,
-                                      &output_len);
+    result = asylo::__asylo_user_init(/*name=*/name_extent.As<char>(),
+                                      /*config=*/input_extent.As<char>(),
+                                      /*config_len=*/input_extent.size(),
+                                      &output, &output_len);
   } catch (...) {
     TrustedPrimitives::BestEffortAbort("Uncaught exception in enclave");
   }
   if (!result) {
-    params->PushByCopy(Extent{output, output_len});
+    out->PushByCopy(Extent{output, output_len});
   }
-  enc_untrusted_free(output);
+  free(output);
   return PrimitiveStatus(result);
 }
 
 // Handler installed by the runtime to invoke the enclave run entry point.
-PrimitiveStatus Run(void *context, TrustedParameterStack *params) {
-  ASYLO_RETURN_IF_INCORRECT_ARGUMENTS(params, 1);
-  auto input_extent = params->Pop();
-  size_t input_len = input_extent->size();
-  ASYLO_RETURN_IF_ERROR(MakePrimitiveStatus(
-      VerifyUntrustedAddressRange(input_extent->data(), input_len)));
-  std::unique_ptr<char[]> input(new char[input_len]);
-  input_extent->CopyTo(input.get());
-
+PrimitiveStatus Run(void *context, MessageReader *in, MessageWriter *out) {
+  ASYLO_RETURN_IF_INCORRECT_READER_ARGUMENTS(*in, 1);
+  auto input_extent = in->next();
   char *output = nullptr;
   size_t output_len = 0;
   int result = 0;
   try {
-    result = asylo::__asylo_user_run(input.get(), input_len, &output,
-                                     &output_len);
+    result = asylo::__asylo_user_run(input_extent.As<char>(),
+                                     input_extent.size(), &output, &output_len);
   } catch (...) {
     TrustedPrimitives::BestEffortAbort("Uncaught exception in enclave");
   }
   if (!result) {
-    params->PushByCopy(Extent{output, output_len});
+    out->PushByCopy(Extent{output, output_len});
   }
-  enc_untrusted_free(output);
+  free(output);
   return PrimitiveStatus(result);
 }
 
 // Handler installed by the runtime to invoke the enclave finalization entry
 // point.
-PrimitiveStatus Finalize(void *context, TrustedParameterStack *params) {
-  ASYLO_RETURN_IF_INCORRECT_ARGUMENTS(params, 1);
-  auto input_extent = params->Pop();
-  size_t input_len = input_extent->size();
-  ASYLO_RETURN_IF_ERROR(MakePrimitiveStatus(
-      VerifyUntrustedAddressRange(input_extent->data(), input_len)));
-  std::unique_ptr<char[]> input(new char[input_len]);
-  input_extent->CopyTo(input.get());
-
+PrimitiveStatus Finalize(void *context, MessageReader *in, MessageWriter *out) {
+  ASYLO_RETURN_IF_INCORRECT_READER_ARGUMENTS(*in, 1);
+  auto input_extent = in->next();
   char *output = nullptr;
   size_t output_len = 0;
   int result = 0;
   try {
-    result = asylo::__asylo_user_fini(input.get(), input_len, &output,
-                                     &output_len);
+    result = asylo::__asylo_user_fini(
+        input_extent.As<char>(), input_extent.size(), &output, &output_len);
   } catch (...) {
     TrustedPrimitives::BestEffortAbort("Uncaught exception in enclave");
   }
   if (!result) {
-    params->PushByCopy(Extent{output, output_len});
+    out->PushByCopy(Extent{output, output_len});
   }
-  enc_untrusted_free(output);
-  return PrimitiveStatus(result);
-}
-
-// Handler installed by the runtime to invoke the enclave donate thread entry
-// point.
-PrimitiveStatus DonateThread(void *context, TrustedParameterStack *params) {
-  ASYLO_RETURN_IF_INCORRECT_ARGUMENTS(params, 0);
-  int result = 0;
-  try {
-    result = asylo::__asylo_threading_donate();
-  } catch (...) {
-    TrustedPrimitives::BestEffortAbort("Uncaught exception in enclave");
-  }
+  free(output);
   return PrimitiveStatus(result);
 }
 
 }  // namespace
 
-Status TrustedApplication::VerifyAndSetState(const EnclaveState &expected_state,
-                                             const EnclaveState &new_state) {
-  absl::MutexLock lock(&mutex_);
-  if (enclave_state_ != expected_state) {
-    return Status(error::GoogleError::FAILED_PRECONDITION,
-                  ::absl::StrCat("Enclave is in state: ", enclave_state_,
-                                 " expected state: ", expected_state));
-  }
-  enclave_state_ = new_state;
-  return Status::OkStatus();
-}
-
-EnclaveState TrustedApplication::GetState() {
-  absl::MutexLock lock(&mutex_);
-  return enclave_state_;
-}
-
-void TrustedApplication::SetState(const EnclaveState &state) {
-  absl::MutexLock lock(&mutex_);
-  enclave_state_ = state;
-}
 
 Status VerifyOutputArguments(char **output, size_t *output_len) {
   if (!output || !output_len) {
@@ -330,7 +194,8 @@ Status InitializeEnvironmentVariables(
                     "Environment variables should set both name and value "
                     "fields");
     }
-    setenv(variable.name().c_str(), variable.value().c_str(), /*overwrite=*/0);
+    int overwrite = 0;
+    setenv(variable.name().c_str(), variable.value().c_str(), overwrite);
   }
   return Status::OkStatus();
 }
@@ -405,20 +270,6 @@ extern "C" {
 
 int __asylo_user_init(const char *name, const char *config, size_t config_len,
                       char **output, size_t *output_len) {
-  // Destroys the global memory pool singleton if enclave initialization was
-  // unsuccessful.
-  struct InitCleaner {
-    bool enclave_was_initialized = false;
-
-    ~InitCleaner() {
-      if (!enclave_was_initialized) {
-        // Delete instance of the global memory pool singleton freeing all
-        // memory held by the pool.
-        delete asylo::UntrustedCacheMalloc::Instance();
-      }
-    }
-  } init_cleaner;
-
   Status status = VerifyOutputArguments(output, output_len);
   if (!status.ok()) {
     return 1;
@@ -433,23 +284,21 @@ int __asylo_user_init(const char *name, const char *config, size_t config_len,
     return status_serializer.Serialize(status);
   }
 
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  status = trusted_application->VerifyAndSetState(
-      EnclaveState::kUninitialized, EnclaveState::kInternalInitializing);
+  status = VerifyAndSetState(EnclaveState::kUninitialized,
+                             EnclaveState::kInternalInitializing);
   if (!status.ok()) {
     return status_serializer.Serialize(status);
   }
 
   SetEnclaveName(name);
   // Invoke the enclave entry-point.
-  status = trusted_application->InitializeInternal(enclave_config);
+  status = GetApplicationInstance()->InitializeInternal(enclave_config);
   if (!status.ok()) {
-    trusted_application->SetState(EnclaveState::kUninitialized);
+    SetState(EnclaveState::kUninitialized);
     return status_serializer.Serialize(status);
   }
 
-  init_cleaner.enclave_was_initialized = true;
-  trusted_application->SetState(EnclaveState::kRunning);
+  SetState(EnclaveState::kRunning);
   return status_serializer.Serialize(status);
 }
 
@@ -471,15 +320,14 @@ int __asylo_user_run(const char *input, size_t input_len, char **output,
     return status_serializer.Serialize(status);
   }
 
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  if (trusted_application->GetState() != EnclaveState::kRunning) {
+  if (GetState() != EnclaveState::kRunning) {
     status = Status(error::GoogleError::FAILED_PRECONDITION,
                     "Enclave not in state RUNNING");
     return status_serializer.Serialize(status);
   }
 
   // Invoke the enclave entry-point.
-  status = trusted_application->Run(enclave_input, &enclave_output);
+  status = GetApplicationInstance()->Run(enclave_input, &enclave_output);
   return status_serializer.Serialize(status);
 }
 
@@ -499,196 +347,18 @@ int __asylo_user_fini(const char *input, size_t input_len, char **output,
     return status_serializer.Serialize(status);
   }
 
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  status = trusted_application->VerifyAndSetState(EnclaveState::kRunning,
-                                                  EnclaveState::kFinalizing);
+  status = VerifyAndSetState(EnclaveState::kRunning, EnclaveState::kFinalizing);
   if (!status.ok()) {
     return status_serializer.Serialize(status);
   }
 
   // Invoke the enclave entry-point.
-  status = trusted_application->Finalize(enclave_final);
+  status = GetApplicationInstance()->Finalize(enclave_final);
 
   ThreadManager *thread_manager = ThreadManager::GetInstance();
   thread_manager->Finalize();
 
-  // Delete instance of the global memory pool singleton freeing all memory held
-  // by the pool.
-  delete asylo::UntrustedCacheMalloc::Instance();
-
-  trusted_application->SetState(EnclaveState::kFinalized);
-  return status_serializer.Serialize(status);
-}
-
-int __asylo_threading_donate() {
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  EnclaveState current_state = trusted_application->GetState();
-  if (current_state < EnclaveState::kUserInitializing ||
-      current_state > EnclaveState::kFinalizing) {
-    Status status = Status(error::GoogleError::FAILED_PRECONDITION,
-                           "Enclave ThreadManager has not been initialized");
-    LOG(ERROR) << status;
-    return EPERM;
-  }
-
-  ThreadManager *thread_manager = ThreadManager::GetInstance();
-  return thread_manager->StartThread();
-}
-
-int __asylo_handle_signal(const char *input, size_t input_len) {
-  asylo::EnclaveSignal signal;
-  if (!signal.ParseFromArray(input, input_len)) {
-    return 1;
-  }
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  EnclaveState current_state = trusted_application->GetState();
-  if (current_state < EnclaveState::kRunning ||
-      current_state > EnclaveState::kFinalizing) {
-    return 2;
-  }
-  int signum = FromBridgeSignal(signal.signum());
-  if (signum < 0) {
-    return 1;
-  }
-  siginfo_t info;
-  info.si_signo = signum;
-  info.si_code = signal.code();
-  ucontext_t ucontext;
-  for (int greg_index = 0;
-       greg_index < NGREG && greg_index < signal.gregs_size(); ++greg_index) {
-    ucontext.uc_mcontext.gregs[greg_index] =
-        static_cast<greg_t>(signal.gregs(greg_index));
-  }
-  SignalManager *signal_manager = SignalManager::GetInstance();
-  const sigset_t mask = signal_manager->GetSignalMask();
-
-  // If the signal is blocked and still passed into the enclave. The signal
-  // masks inside the enclave is out of sync with the untrusted signal mask.
-  if (sigismember(&mask, signum)) {
-    return -1;
-  }
-  if (!signal_manager->HandleSignal(signum, &info, &ucontext).ok()) {
-    return 1;
-  }
-  return 0;
-}
-
-int __asylo_take_snapshot(char **output, size_t *output_len) {
-  Status status = VerifyOutputArguments(output, output_len);
-  if (!status.ok()) {
-    return 1;
-  }
-  EnclaveOutput enclave_output;
-  // Take snapshot should not change any enclave states. Call
-  // enc_untrusted_malloc directly to create the StatusSerializer to avoid
-  // change the state of UntrustedCacheMalloc instance after snapshotting.
-  StatusSerializer<EnclaveOutput> status_serializer(
-      &enclave_output, enclave_output.mutable_status(), output, output_len,
-      &enc_untrusted_malloc);
-
-  asylo::StatusOr<const asylo::EnclaveConfig *> config_result =
-      asylo::GetEnclaveConfig();
-
-  if (!config_result.ok()) {
-    return status_serializer.Serialize(config_result.status());
-  }
-
-  const asylo::EnclaveConfig *config = config_result.ValueOrDie();
-  if (!config->has_enable_fork() || !config->enable_fork()) {
-    status = Status(error::GoogleError::FAILED_PRECONDITION,
-                    "Insecure fork not enabled");
-    return status_serializer.Serialize(status);
-  }
-
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  if (trusted_application->GetState() != EnclaveState::kRunning) {
-    status = Status(error::GoogleError::FAILED_PRECONDITION,
-                    "Enclave not in state RUNNING");
-    return status_serializer.Serialize(status);
-  }
-
-  SnapshotLayout snapshot_layout;
-  status = TakeSnapshotForFork(&snapshot_layout);
-  *enclave_output.MutableExtension(snapshot) = snapshot_layout;
-  return status_serializer.Serialize(status);
-}
-
-int __asylo_restore(const char *input, size_t input_len, char **output,
-                    size_t *output_len) {
-  Status status = VerifyOutputArguments(output, output_len);
-  if (!status.ok()) {
-    return 1;
-  }
-
-  StatusSerializer<StatusProto> status_serializer(output, output_len);
-
-  asylo::StatusOr<const asylo::EnclaveConfig *> config_result =
-      asylo::GetEnclaveConfig();
-
-  if (!config_result.ok()) {
-    return status_serializer.Serialize(config_result.status());
-  }
-
-  const asylo::EnclaveConfig *config = config_result.ValueOrDie();
-  if (!config->has_enable_fork() || !config->enable_fork()) {
-    status = Status(error::GoogleError::FAILED_PRECONDITION,
-                    "Insecure fork not enabled");
-    return status_serializer.Serialize(status);
-  }
-
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  if (trusted_application->GetState() != EnclaveState::kRunning) {
-    status = Status(error::GoogleError::FAILED_PRECONDITION,
-                    "Enclave not in state RUNNING");
-    return status_serializer.Serialize(status);
-  }
-
-  // |input| contains a serialized SnapshotLayout. We pass it to
-  // RestoreForFork() without deserializing it because this proto requires
-  // heap-allocated memory. Since restoring for fork() requires use of
-  // a separate heap, we must take care to invoke this protos's allocators and
-  // deallocators using the same heap. Consequently, we wait to deserialize this
-  // message until after switching heaps in RestoreForFork().
-  status = RestoreForFork(input, input_len);
-
-  if (!status.ok()) {
-    // Finalize the enclave as this enclave shouldn't be entered again.
-    ThreadManager *thread_manager = ThreadManager::GetInstance();
-    thread_manager->Finalize();
-
-    // Delete instance of the global memory pool singleton freeing all memory
-    // held by the pool.
-    delete asylo::UntrustedCacheMalloc::Instance();
-    trusted_application->SetState(EnclaveState::kFinalized);
-  }
-
-  return status_serializer.Serialize(status);
-}
-
-int __asylo_transfer_secure_snapshot_key(const char *input, size_t input_len,
-                                         char **output, size_t *output_len) {
-  Status status = VerifyOutputArguments(output, output_len);
-  if (!status.ok()) {
-    return 1;
-  }
-
-  StatusSerializer<StatusProto> status_serializer(output, output_len);
-
-  asylo::ForkHandshakeConfig fork_handshake_config;
-  if (!fork_handshake_config.ParseFromArray(input, input_len)) {
-    status = Status(error::GoogleError::INVALID_ARGUMENT,
-                    "Failed to parse HandshakeInput");
-    return status_serializer.Serialize(status);
-  }
-
-  TrustedApplication *trusted_application = GetApplicationInstance();
-  if (trusted_application->GetState() != EnclaveState::kRunning) {
-    status = Status(error::GoogleError::FAILED_PRECONDITION,
-                    "Enclave not in state RUNNING");
-    return status_serializer.Serialize(status);
-  }
-
-  status = TransferSecureSnapshotKey(fork_handshake_config);
+  SetState(EnclaveState::kFinalized);
   return status_serializer.Serialize(status);
 }
 
@@ -721,13 +391,6 @@ extern "C" PrimitiveStatus asylo_enclave_init() {
     TrustedPrimitives::BestEffortAbort("Could not register entry handler");
   }
 
-  // Register the enclave donate thread entry handler.
-  EntryHandler donate_thread_handler{asylo::DonateThread};
-  if (!TrustedPrimitives::RegisterEntryHandler(
-           asylo::kSelectorAsyloDonateThread, donate_thread_handler)
-           .ok()) {
-    TrustedPrimitives::BestEffortAbort("Could not register entry handler");
-  }
   return PrimitiveStatus::OkStatus();
 }
 

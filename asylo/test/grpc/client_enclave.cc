@@ -25,6 +25,8 @@
 #include "asylo/enclave.pb.h"
 #include "asylo/grpc/auth/enclave_channel_credentials.h"
 #include "asylo/grpc/auth/null_credentials_options.h"
+#include "asylo/grpc/auth/peer_sgx_age_remote_credentials_options.h"
+#include "asylo/grpc/auth/sgx_age_remote_credentials_options.h"
 #include "asylo/grpc/auth/sgx_local_credentials_options.h"
 #include "asylo/test/grpc/client_enclave.pb.h"
 #include "asylo/test/grpc/messenger_client_impl.h"
@@ -54,6 +56,10 @@ EnclaveCredentialsOptions GetCredentialsOptions(
       case SGX_LOCAL_GRPC_CREDENTIALS_OPTIONS:
         options.Add(self ? SelfSgxLocalCredentialsOptions()
                          : PeerSgxLocalCredentialsOptions());
+        break;
+      case SGX_AGE_REMOTE_GRPC_CREDENTIALS_OPTIONS:
+        options.Add(self ? SelfSgxAgeRemoteCredentialsOptions()
+                         : PeerSgxAgeRemoteCredentialsOptions());
         break;
       case UNKNOWN_GRPC_CREDENTIALS_OPTIONS:
       default:
@@ -91,12 +97,17 @@ Status ClientEnclave::Run(const EnclaveInput &input, EnclaveOutput *output) {
                 absl::Microseconds(1)
           : kDeadlineMicros;
 
+  EnclaveCredentialsOptions credentials_options =
+      GetCredentialsOptions(client_input.self_grpc_creds_options(),
+                            /*self=*/true)
+          .Add(GetCredentialsOptions(client_input.peer_grpc_creds_options(),
+                                     /*self=*/false));
+  if (client_input.has_peer_acl()) {
+    credentials_options.peer_acl = client_input.peer_acl();
+  }
+
   std::shared_ptr<::grpc::ChannelCredentials> channel_credentials =
-      EnclaveChannelCredentials(
-          GetCredentialsOptions(client_input.self_grpc_creds_options(),
-                                /*self=*/true)
-              .Add(GetCredentialsOptions(client_input.peer_grpc_creds_options(),
-                                         /*self=*/false)));
+      EnclaveChannelCredentials(credentials_options);
 
   // Connect a gRPC channel to the server specified in the EnclaveInput.
   std::shared_ptr<::grpc::Channel> channel =

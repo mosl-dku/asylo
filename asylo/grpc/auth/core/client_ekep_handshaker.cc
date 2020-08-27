@@ -34,6 +34,7 @@
 #include "asylo/grpc/auth/core/handshake.pb.h"
 #include "asylo/identity/identity.pb.h"
 #include "asylo/util/cleansing_types.h"
+#include "asylo/util/proto_enum_util.h"
 #include "asylo/util/status_macros.h"
 
 namespace asylo {
@@ -53,7 +54,7 @@ ClientEkepHandshaker::ClientEkepHandshaker(const EkepHandshakerOptions &options)
       self_assertions_(options.self_assertions),
       accepted_peer_assertions_(options.accepted_peer_assertions),
       available_cipher_suites_({CURVE25519_SHA256}),
-      available_record_protocols_({SEAL_AES128_GCM}),
+      available_record_protocols_({ALTSRP_AES128_GCM}),
       available_ekep_versions_({"EKEP v1"}),
       additional_authenticated_data_(options.additional_authenticated_data),
       selected_cipher_suite_(UNKNOWN_HANDSHAKE_CIPHER),
@@ -167,7 +168,7 @@ ClientEkepHandshaker::Result ClientEkepHandshaker::HandleHandshakeMessage(
 
 void ClientEkepHandshaker::HandleAbortMessage(const Abort *abort_message) {
   if (abort_message) {
-    LOG(ERROR) << "Received " << Abort_ErrorCode_Name(abort_message->code())
+    LOG(ERROR) << "Received " << ProtoEnumValueName(abort_message->code())
                << " from server: " << abort_message->message();
   }
 
@@ -197,7 +198,7 @@ Status ClientEkepHandshaker::HandleServerPrecommit(
   if (!SetSelectedCipherSuite(cipher_suite)) {
     return Status(Abort::PROTOCOL_ERROR,
                   absl::StrCat("Selected cipher suite is invalid: ",
-                               HandshakeCipher_Name(cipher_suite)));
+                               ProtoEnumValueName(cipher_suite)));
   }
 
   // Use the selected cipher suite to set the transcript hash function.
@@ -207,7 +208,7 @@ Status ClientEkepHandshaker::HandleServerPrecommit(
       break;
     default:
       LOG(ERROR) << "Client handshaker has bad cipher suite configuration"
-                 << HandshakeCipher_Name(selected_cipher_suite_);
+                 << ProtoEnumValueName(selected_cipher_suite_);
       return Status(Abort::INTERNAL_ERROR, "Error using selected cipher suite");
   }
 
@@ -215,7 +216,7 @@ Status ClientEkepHandshaker::HandleServerPrecommit(
   if (!SetSelectedRecordProtocol(record_protocol)) {
     return Status(Abort::PROTOCOL_ERROR,
                   absl::StrCat("Selected record protocol is invalid: ",
-                               RecordProtocol_Name(record_protocol)));
+                               ProtoEnumValueName(record_protocol)));
   }
 
   // Verify that the server sent an adequately-sized challenge.
@@ -398,7 +399,8 @@ Status ClientEkepHandshaker::WriteClientPrecommit(std::string *output) {
         GetEnclaveAssertionGenerator(description)
             ->CreateAssertionOffer(client_precommit.add_client_offers());
     if (!status.ok()) {
-      LOG(ERROR) << "Failed to create assertion offer: " << status;
+      LOG(ERROR) << "Failed to create assertion offer for description"
+                 << description.ShortDebugString() << ": " << status;
       return Status(Abort::INTERNAL_ERROR, "Failed to create assertion offer");
     }
   }

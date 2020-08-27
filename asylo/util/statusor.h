@@ -21,29 +21,27 @@
 
 #include <type_traits>
 
+#include "absl/base/attributes.h"
 #include "absl/meta/type_traits.h"
 #include "asylo/util/logging.h"
+#include "asylo/util/cleanup.h"
 #include "asylo/util/status.h"
 #include "asylo/util/status_error_space.h"
 
 namespace asylo {
 
 #ifdef NDEBUG
-constexpr char kValueMoveConstructorMsg[] = "";
-constexpr char kValueMoveAssignmentMsg[] = "";
-constexpr char kValueOrDieMovedMsg[] = "";
-constexpr char kStatusMoveConstructorMsg[] = "";
-constexpr char kStatusMoveAssignmentMsg[] = "";
+ABSL_CONST_INIT extern const char kValueMoveConstructorMsg[];
+ABSL_CONST_INIT extern const char kValueMoveAssignmentMsg[];
+ABSL_CONST_INIT extern const char kValueOrDieMovedMsg[];
+ABSL_CONST_INIT extern const char kStatusMoveConstructorMsg[];
+ABSL_CONST_INIT extern const char kStatusMoveAssignmentMsg[];
 #else
-constexpr char kValueMoveConstructorMsg[] =
-    "Value moved by StatusOr move constructor";
-constexpr char kValueMoveAssignmentMsg[] =
-    "Value moved by StatusOr move assignment";
-constexpr char kStatusMoveConstructorMsg[] =
-    "Status moved by StatusOr move constructor";
-constexpr char kValueOrDieMovedMsg[] = "Value moved by StatusOr::ValueOrDie";
-constexpr char kStatusMoveAssignmentMsg[] =
-    "Status moved by StatusOr move assignment";
+ABSL_CONST_INIT extern const char kValueMoveConstructorMsg[];
+ABSL_CONST_INIT extern const char kValueMoveAssignmentMsg[];
+ABSL_CONST_INIT extern const char kStatusMoveConstructorMsg[];
+ABSL_CONST_INIT extern const char kValueOrDieMovedMsg[];
+ABSL_CONST_INIT extern const char kStatusMoveAssignmentMsg[];
 #endif
 
 /// A class for representing either a usable value, or an error.
@@ -309,7 +307,9 @@ class StatusOr {
   /// \return The stored `T` value.
   const T &ValueOrDie() const & {
     if (!ok()) {
-      LOG(FATAL) << "Object does not have a usable value";
+      LOG(FATAL)
+          << "Object does not have a usable value, instead contains status: "
+          << status();
     }
     return variant_.value_;
   }
@@ -322,7 +322,9 @@ class StatusOr {
   /// \return The stored `T` value.
   T &ValueOrDie() & {
     if (!ok()) {
-      LOG(FATAL) << "Object does not have a usable value";
+      LOG(FATAL)
+          << "Object does not have a usable value, instead contains status: "
+          << status();
     }
     return variant_.value_;
   }
@@ -337,14 +339,17 @@ class StatusOr {
   /// \return The stored `T` value.
   T ValueOrDie() && {
     if (!ok()) {
-      LOG(FATAL) << "Object does not have a usable value";
+      LOG(FATAL)
+          << "Object does not have a usable value, instead contains status: "
+          << status();
     }
-    T tmp(std::move(variant_.value_));
 
-    // Invalidate this StatusOr object.
-    OverwriteValueWithStatus(
-        Status(error::StatusError::MOVED, kValueOrDieMovedMsg));
-    return std::move(tmp);
+    // Invalidate this StatusOr object before returning control to caller.
+    Cleanup set_moved_status([this] {
+      OverwriteValueWithStatus(
+          Status(error::StatusError::MOVED, kValueOrDieMovedMsg));
+    });
+    return std::move(variant_.value_);
   }
 
  private:

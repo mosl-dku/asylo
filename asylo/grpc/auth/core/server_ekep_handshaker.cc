@@ -31,6 +31,7 @@
 #include "asylo/grpc/auth/core/handshake.pb.h"
 #include "asylo/identity/identity.pb.h"
 #include "asylo/util/cleansing_types.h"
+#include "asylo/util/proto_enum_util.h"
 #include "asylo/util/status_macros.h"
 
 namespace asylo {
@@ -59,7 +60,7 @@ ServerEkepHandshaker::ServerEkepHandshaker(const EkepHandshakerOptions &options)
       self_assertions_(options.self_assertions),
       accepted_peer_assertions_(options.accepted_peer_assertions),
       available_cipher_suites_({CURVE25519_SHA256}),
-      available_record_protocols_({SEAL_AES128_GCM}),
+      available_record_protocols_({ALTSRP_AES128_GCM}),
       available_ekep_versions_({"EKEP v1"}),
       additional_authenticated_data_(options.additional_authenticated_data),
       selected_cipher_suite_(UNKNOWN_HANDSHAKE_CIPHER),
@@ -177,7 +178,7 @@ ServerEkepHandshaker::Result ServerEkepHandshaker::HandleHandshakeMessage(
 
 void ServerEkepHandshaker::HandleAbortMessage(const Abort *abort_message) {
   if (abort_message) {
-    LOG(ERROR) << "Received " << Abort_ErrorCode_Name(abort_message->code())
+    LOG(ERROR) << "Received " << ProtoEnumValueName(abort_message->code())
                << " from client: " << abort_message->message();
   }
 
@@ -213,7 +214,7 @@ Status ServerEkepHandshaker::HandleClientPrecommit(
       break;
     default:
       LOG(ERROR) << "Server handshaker has bad cipher suite configuration"
-                 << HandshakeCipher_Name(selected_cipher_suite_);
+                 << ProtoEnumValueName(selected_cipher_suite_);
       return Status(Abort::INTERNAL_ERROR, "Error using selected cipher suite");
   }
 

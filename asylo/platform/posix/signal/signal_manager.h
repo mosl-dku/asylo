@@ -20,34 +20,44 @@
 #define ASYLO_PLATFORM_POSIX_SIGNAL_SIGNAL_MANAGER_H_
 
 #include <signal.h>
-#include <memory>
 
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
-#include "absl/synchronization/mutex.h"
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
+
+#include "asylo/platform/core/trusted_spin_lock.h"
 #include "asylo/util/status.h"
 
 namespace asylo {
+
+constexpr int kNumberSignals = NSIG;
 
 // SignalManager class is a singleton responsible for maintaining mapping
 // between signum and registered signal handlers.
 class SignalManager {
  public:
+  // The reset status of a signal handler. Whether it shouldn't be reset, should
+  // be reset after a handling a signal, or has already been reset.
+  enum class ResetStatus {
+    NOT_AVAILABLE = 0,
+    NO_RESET = 1,
+    TO_BE_RESET = 2,
+    RESET = 3,
+  };
+
   static SignalManager *GetInstance();
 
   // Locates and calls the handler registered for |signum|.
-  Status HandleSignal(int signum, siginfo_t *info, void *ucontext);
+  void HandleSignal(int signum, siginfo_t *info, void *ucontext);
 
   // Sets a signal handler pointer for a specific signal |signum|.
-  void SetSigAction(int signum, const struct sigaction &act)
-      LOCKS_EXCLUDED(signal_to_sigaction_lock_);
+  void SetSigAction(int signum, const struct sigaction &act);
 
   // Gets a signal handler for a specific signal |signum|.
-  const struct sigaction *GetSigAction(int signum) const
-      LOCKS_EXCLUDED(signal_to_sigaction_lock_);
+  bool GetSigAction(int signum, struct sigaction *act);
 
   // Remove a signal handler for a specific signal |signum|.
-  void ClearSigAction(int signum) LOCKS_EXCLUDED(signal_to_sigaction_lock_);
+  void ClearSigAction(int signum);
 
   // Blocks all the signals in |set|.
   void BlockSignals(const sigset_t &set);
@@ -64,23 +74,25 @@ class SignalManager {
   // Gets the set of unblocked signals in |set|.
   sigset_t GetUnblockedSet(const sigset_t &set);
 
-  // Add a signal to the reset list.
-  void SetResetOnHandle(int signum) LOCKS_EXCLUDED(signal_to_reset_lock_);
+  // Sets the reset status of a signal to |status|.
+  void SetResetStatus(int signum, ResetStatus status);
 
-  // Check if a signal needs to reset handler.
-  bool IsResetOnHandle(int signum) LOCKS_EXCLUDED(signal_to_reset_lock_);
+  // Gets the reset status of a signal.
+  ResetStatus GetResetStatus(int signum);
 
  private:
-  SignalManager() = default;  // Private to enforce singleton.
+  SignalManager();  // Private to enforce singleton.
   SignalManager(SignalManager const &) = delete;
   void operator=(SignalManager const &) = delete;
 
-  mutable absl::Mutex signal_to_sigaction_lock_;
-  absl::flat_hash_map<int, std::unique_ptr<struct sigaction>>
-      signal_to_sigaction_ GUARDED_BY(signal_to_sigaction_lock_);
+  // Use spin lock in SignalManager to avoid exiting the enclave while handling
+  // the signal.
+  TrustedSpinLock signal_maps_lock_;
 
-  mutable absl::Mutex signal_to_reset_lock_;
-  absl::flat_hash_set<int> signal_to_reset_ GUARDED_BY(signal_to_reset_lock_);
+  std::unordered_map<int, std::unique_ptr<struct sigaction>>
+      signal_to_sigaction_;
+
+  std::array<ResetStatus, kNumberSignals> signal_to_reset_;
 
   thread_local static sigset_t signal_mask_;
 };

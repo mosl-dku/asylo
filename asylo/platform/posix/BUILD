@@ -14,16 +14,20 @@
 # limitations under the License.
 #
 
+load("@linux_sgx//:sgx_sdk.bzl", "sgx")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "//asylo/bazel:asylo.bzl",
-    "ASYLO_ALL_BACKENDS",
-    "sgx_enclave_test",
+    "ASYLO_ALL_BACKEND_TAGS",
+    "cc_unsigned_enclave",
+    "debug_sign_enclave",
+    "enclave_test",
     cc_test = "cc_test_and_cc_enclave_test",
 )
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
-load("@linux_sgx//:sgx_sdk.bzl", "sgx_enclave")
 
-licenses(["notice"])  # Apache v2.0
+licenses(["notice"])
 
 # asylo POSIX interface.
 
@@ -47,13 +51,56 @@ filegroup(
 cc_library(
     name = "trusted_posix",
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = select(
         {
-            "//asylo/platform/primitives:sgx": [":posix"],
+            "@com_google_asylo//asylo": [
+                ":posix",
+                "//asylo/platform/posix/syscall:enclave_syscall",
+            ],
         },
-        no_match_error = "Expected a trusted backend configuration (e.g., --config=sgx)",
+        no_match_error = "Must be built in the Asylo toolchain",
     ),
+)
+
+# A backend agnostic POSIX runtime implementation.
+# This can be used by backends requiring posix calls that are platform
+# independent, or as a dependency by higher level library like posix, to
+# separate backend dependent and backend independent posix calls provided by
+# posix library. Expected to be removed if/when all posix calls in posix library
+# become backend independent.
+cc_library(
+    name = "backend_agnostic_posix",
+    srcs = [
+        "dirent.cc",
+        "dlfcn.cc",
+        "endian.cc",
+        "errno.cc",
+        "grp.cc",
+        "if.cc",
+        "ifaddrs.cc",
+        "malloc_lock.cc",
+        "nl_types.cc",
+        "pwd.cc",
+        "sched.cc",
+        "syslog.cc",
+        "termios.cc",
+        "time.cc",
+        "utsname.cc",
+        "wait.cc",
+    ],
+    hdrs = [":posix_headers"],
+    copts = ASYLO_DEFAULT_COPTS,
+    linkstatic = 1,
+    tags = ASYLO_ALL_BACKEND_TAGS,
+    deps = [
+        "//asylo/platform/common:time_util",
+        "//asylo/platform/core:atomic",
+        "//asylo/platform/host_call",
+        "//asylo/platform/posix/sockets:backend_agnostic_sockets",
+        "//asylo/platform/primitives:trusted_backend",
+    ],
+    alwayslink = 1,
 )
 
 cc_library(
@@ -64,73 +111,80 @@ cc_library(
 )
 
 # POSIX runtime implementation.
+_POSIX_SGX_HDRS = ["//asylo/third_party/intel:posix_sgx_headers"]
+
+_POSIX_SGX_DEPS = ["@linux_sgx//:trts"]
+
 cc_library(
     name = "posix",
     srcs = [
-        "dirent.cc",
-        "dlfcn.cc",
-        "endian.cc",
         "epoll.cc",
-        "errno.cc",
         "eventfd.cc",
         "file.cc",
-        "grp.cc",
-        "ifaddrs.cc",
         "inotify.cc",
         "ioctl.cc",
-        "malloc_lock.cc",
-        "mman.cc",
         "poll.cc",
         "pthread.cc",
-        "pwd.cc",
         "resource.cc",
-        "sched.cc",
         "select.cc",
         "signal.cc",
         "stat.cc",
+        "statfs.cc",
+        "stdio.cc",
         "stdlib.cc",
-        "syslog.cc",
-        "termios.cc",
-        "time.cc",
         "uio.cc",
         "unistd.cc",
         "utime.cc",
-        "utsname.cc",
-        "wait.cc",
     ],
     hdrs = [
         ":posix_headers",
-    ] + select({
-        "//asylo/platform/primitives:sgx": [
-            "//asylo/third_party/intel:posix_sgx_headers",
-        ],
-        "//conditions:default": [],
-    }),
+    ] + select(
+        {
+            "@linux_sgx//:sgx_hw": _POSIX_SGX_HDRS,
+            "@linux_sgx//:sgx_sim": _POSIX_SGX_HDRS,
+            "//conditions:default": [],
+        },
+    ),
     copts = ASYLO_DEFAULT_COPTS,
     linkstatic = 1,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     visibility = ["//visibility:private"],
     deps = [
-        ":pthread_impl",
         "@com_google_absl//absl/synchronization",
         "//asylo/util:logging",
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/arch:trusted_fork",
-        "//asylo/platform/common:bridge_types",
-        "//asylo/platform/common:time_util",
+        "//asylo/platform/host_call",
+        "//asylo/platform/common:enclave_state",
+        "//asylo/platform/core:atomic",
         "//asylo/platform/core:shared_name",
         "//asylo/platform/core:trusted_core",
         "//asylo/platform/posix/io:io_manager",
         "//asylo/platform/posix/sockets",
-        "//asylo/platform/primitives:trusted_backend",
         "//asylo/platform/posix/signal:signal_manager",
+        "//asylo/platform/posix/syscall:enclave_clone",
+        "//asylo/platform/posix/syscall:signal_syscalls",
         "//asylo/platform/posix/threading:thread_manager",
+        "//asylo/platform/primitives/util:trusted_memory",
         "//asylo/platform/system",
         "//asylo/util:status",
-    ] + select({
-        "//asylo/platform/primitives:sgx": ["@linux_sgx//:trts"],
-        "//conditions:default": [],
-    }),
+    ] + select(
+        {
+            "@linux_sgx//:sgx_hw": _POSIX_SGX_DEPS,
+            "@linux_sgx//:sgx_sim": _POSIX_SGX_DEPS,
+            "//conditions:default": [],
+        },
+    ) + select(
+        {
+            "@com_google_asylo//asylo": [
+                # Only trusted architectures should build.
+                ":pthread_impl",
+                ":backend_agnostic_posix",
+                "//asylo/platform/primitives:trusted_primitives",
+                "//asylo/platform/arch:trusted_arch",
+            ],
+        },
+        no_match_error = "Must be built within the Asylo toolchain.",
+    ),
+    alwayslink = 1,
 )
 
 # Test byteswap.h posix extension inside an enclave.
@@ -173,8 +227,10 @@ cc_test(
 cc_test(
     name = "pipe_test",
     srcs = ["pipe_test.cc"],
+    backends = sgx.backend_labels,
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        "//asylo/test/util:memory_matchers",
         "//asylo/test/util:test_main",
         "//asylo/util:cleanup",
         "@com_google_absl//absl/strings",
@@ -198,23 +254,111 @@ cc_test(
     ],
 )
 
-sgx_enclave(
-    name = "fork_test.so",
+cc_unsigned_enclave(
+    name = "fork_test_unsigned.so",
     srcs = ["fork_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        "//asylo/platform/primitives:trusted_runtime",
         "//asylo/test/util:enclave_test_application",
+        "//asylo/util:logging",
+        "//asylo/util:status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "fork_test.so",
+    unsigned = "fork_test_unsigned.so",
+)
+
+enclave_test(
     name = "fork_test",
     srcs = ["fork_test_driver.cc"],
+    backends = sgx.backend_labels,
     copts = ASYLO_DEFAULT_COPTS,
     enclaves = {"enclave": "fork_test.so"},
     test_args = ["--enclave_path='{enclave}'"],
     deps = [
+        "//asylo:enclave_cc_proto",
         "//asylo:enclave_client",
+        "//asylo/platform/primitives/sgx:loader_cc_proto",
+        "//asylo/test/util:enclave_assertion_authority_configs",
+        "//asylo/test/util:enclave_test",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+debug_sign_enclave(
+    name = "fork_consistency_test.so",
+    unsigned = "fork_consistency_test_unsigned.so",
+)
+
+cc_unsigned_enclave(
+    name = "fork_consistency_test_unsigned.so",
+    srcs = ["fork_consistency_test_enclave.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        "//asylo/platform/primitives:trusted_runtime",
+        "//asylo/test/util:enclave_test_application",
+        "//asylo/util:logging",
+        "//asylo/util:status",
+    ],
+)
+
+enclave_test(
+    name = "fork_consistency_test",
+    srcs = ["fork_test_driver.cc"],
+    backends = sgx.backend_labels,
+    copts = ASYLO_DEFAULT_COPTS,
+    enclaves = {"enclave": "fork_consistency_test.so"},
+    test_args = ["--enclave_path='{enclave}'"],
+    deps = [
+        "//asylo:enclave_cc_proto",
+        "//asylo:enclave_client",
+        "//asylo/platform/primitives/sgx:loader_cc_proto",
+        "//asylo/test/util:enclave_assertion_authority_configs",
+        "//asylo/test/util:enclave_test",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+debug_sign_enclave(
+    name = "fork_multithread_test.so",
+    unsigned = "fork_multithread_test_unsigned.so",
+)
+
+cc_unsigned_enclave(
+    name = "fork_multithread_test_unsigned.so",
+    srcs = ["fork_multithread_test_enclave.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        "//asylo/platform/primitives:trusted_runtime",
+        "//asylo/test/util:enclave_test_application",
+        "//asylo/util:logging",
+        "//asylo/util:status",
+    ],
+)
+
+enclave_test(
+    name = "fork_multithread_test",
+    srcs = ["fork_test_driver.cc"],
+    backends = sgx.backend_labels,
+    copts = ASYLO_DEFAULT_COPTS,
+    enclaves = {"enclave": "fork_multithread_test.so"},
+    test_args = ["--enclave_path='{enclave}'"],
+    deps = [
+        "//asylo:enclave_cc_proto",
+        "//asylo:enclave_client",
+        "//asylo/platform/primitives/sgx:loader_cc_proto",
         "//asylo/test/util:enclave_assertion_authority_configs",
         "//asylo/test/util:enclave_test",
         "//asylo/test/util:status_matchers",
@@ -236,21 +380,28 @@ cc_proto_library(
     deps = [":fork_security_test_proto"],
 )
 
-sgx_enclave(
-    name = "fork_security_test.so",
+cc_unsigned_enclave(
+    name = "fork_security_test_unsigned.so",
     srcs = ["fork_security_test_enclave.cc"],
+    backends = sgx.backend_labels,  # Uses sgx:trusted_fork.
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":fork_security_test_cc_proto",
-        "//asylo/platform/arch:trusted_fork",
         "//asylo/platform/primitives:trusted_backend",
+        "//asylo/platform/primitives/sgx:trusted_fork",
         "//asylo/test/util:enclave_test_application",
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "fork_security_test.so",
+    unsigned = "fork_security_test_unsigned.so",
+)
+
+enclave_test(
     name = "fork_security_test",
     srcs = ["fork_security_test_driver.cc"],
+    backends = sgx.backend_labels,  # Has SGX loader dependencies
     copts = ASYLO_DEFAULT_COPTS,
     enclaves = {"enclave": "fork_security_test.so"},
     test_args = ["--enclave_path='{enclave}'"],
@@ -258,9 +409,11 @@ sgx_enclave_test(
         ":fork_security_test_cc_proto",
         "//asylo:enclave_cc_proto",
         "//asylo:enclave_client",
-        "//asylo/platform/arch:fork_cc_proto",
         "//asylo/platform/common:memory",
         "//asylo/platform/core:untrusted_core",
+        "//asylo/platform/primitives/sgx:fork_cc_proto",
+        "//asylo/platform/primitives/sgx:loader_cc_proto",
+        "//asylo/platform/primitives/sgx:untrusted_sgx",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "//asylo/util:status",
@@ -283,22 +436,33 @@ cc_proto_library(
     deps = ["syscalls_test_proto"],
 )
 
-# SGX enclave used to test different syscalls.
-sgx_enclave(
-    name = "syscalls_test.so",
+# Enclave used to test different syscalls.
+cc_unsigned_enclave(
+    name = "syscalls_test_unsigned.so",
     srcs = ["syscalls_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":syscalls_test_cc_proto",
-        "//asylo/platform/common:bridge_proto_serializer",
+        "//asylo/platform/host_call:serializer_functions",
+        "//asylo/platform/primitives:trusted_primitives",
+        "//asylo/platform/primitives/util:message_reader_writer",
+        "//asylo/platform/primitives/util:status_conversions",
+        "//asylo/platform/storage/utils:fd_closer",
         "//asylo/test/util:enclave_test_application",
         "//asylo/util:logging",
         "//asylo/util:status",
+        "@boringssl//:crypto",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings",
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "syscalls_test.so",
+    unsigned = "syscalls_test_unsigned.so",
+)
+
+enclave_test(
     name = "syscalls_test",
     srcs = ["syscalls_test_driver.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -307,7 +471,8 @@ sgx_enclave_test(
     deps = [
         ":syscalls_test_cc_proto",
         "//asylo:enclave_client",
-        "//asylo/platform/common:bridge_proto_serializer",
+        "//asylo/platform/host_call:serializer_functions",
+        "//asylo/platform/primitives/util:message_reader_writer",
         "//asylo/test/util:enclave_test",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
@@ -351,8 +516,8 @@ cc_proto_library(
     deps = ["in6_macro_test_proto"],
 )
 
-sgx_enclave(
-    name = "in6_macro_test.so",
+cc_unsigned_enclave(
+    name = "in6_macro_test_unsigned.so",
     srcs = ["in6_macro_test_enclave.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
@@ -362,7 +527,12 @@ sgx_enclave(
     ],
 )
 
-sgx_enclave_test(
+debug_sign_enclave(
+    name = "in6_macro_test.so",
+    unsigned = "in6_macro_test_unsigned.so",
+)
+
+enclave_test(
     name = "in6_macro_test",
     srcs = ["in6_macro_test_loader.cc"],
     copts = ASYLO_DEFAULT_COPTS,
@@ -374,6 +544,52 @@ sgx_enclave_test(
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
         "//asylo/util:status",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+# Testing the enclave clock vs the posix clock.
+proto_library(
+    name = "clock_time_test_proto",
+    srcs = ["clock_time_test.proto"],
+    deps = ["//asylo:enclave_proto"],
+)
+
+cc_proto_library(
+    name = "clock_time_test_cc_proto",
+    deps = ["clock_time_test_proto"],
+)
+
+cc_unsigned_enclave(
+    name = "clock_time_test_unsigned.so",
+    srcs = ["clock_time_test_enclave.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":clock_time_test_cc_proto",
+        ":posix",
+        "//asylo:enclave_runtime",
+        "//asylo/util:status",
+    ],
+)
+
+debug_sign_enclave(
+    name = "clock_time_test.so",
+    unsigned = "clock_time_test_unsigned.so",
+)
+
+enclave_test(
+    name = "clock_time_test",
+    srcs = ["clock_time_test_loader.cc"],
+    copts = ASYLO_DEFAULT_COPTS,
+    enclaves = {"enclave": "clock_time_test.so"},
+    test_args = ["--enclave_path='{enclave}'"],
+    deps = [
+        ":clock_time_test_cc_proto",
+        "//asylo/test/util:enclave_test",
+        "//asylo/test/util:status_matchers",
+        "//asylo/test/util:test_main",
+        "//asylo/util:status",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
     ],
 )

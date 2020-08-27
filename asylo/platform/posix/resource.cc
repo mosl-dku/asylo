@@ -16,12 +16,9 @@
  *
  */
 
-#ifndef THIRD_PARTY_ASYLO_PLATFORM_POSIX_SRC_RESOURCE_H_
-#define THIRD_PARTY_ASYLO_PLATFORM_POSIX_SRC_RESOURCE_H_
-
 #include <sys/resource.h>
 
-#include "asylo/platform/arch/include/trusted/host_calls.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
 #include "asylo/platform/posix/io/io_manager.h"
 
 extern "C" {
@@ -51,5 +48,3 @@ int getrusage(int who, struct rusage *usage) {
 }
 
 }  // extern "C"
-
-#endif  // THIRD_PARTY_ASYLO_PLATFORM_POSIX_SRC_RESOURCE_H_

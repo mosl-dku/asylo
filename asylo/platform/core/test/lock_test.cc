@@ -22,12 +22,12 @@
 #include <gtest/gtest.h>
 #include "asylo/platform/core/trusted_mutex.h"
 #include "asylo/platform/core/trusted_spin_lock.h"
-#include "asylo/platform/core/untrusted_mutex.h"
 
 namespace asylo {
 namespace {
 
 constexpr int kManyThreads = 12;
+constexpr int kNumIters = 128 * 256;
 
 template <typename LockType>
 class LockTest : public ::testing::Test {
@@ -37,8 +37,7 @@ class LockTest : public ::testing::Test {
   LockType non_recursive_;
 };
 
-typedef ::testing::Types<UntrustedMutex, TrustedSpinLock, TrustedMutex>
-    Implementations;
+typedef ::testing::Types<TrustedSpinLock, TrustedMutex> Implementations;
 
 TYPED_TEST_SUITE(LockTest, Implementations);
 
@@ -64,7 +63,7 @@ TYPED_TEST(LockTest, RecursiveManyThreadsTest) {
   std::vector<std::thread> threads;
   for (int i = 0; i < kManyThreads; i++) {
     threads.emplace_back([&]() {
-      for (int i = 0; i < 128 * 1024; i++) {
+      for (int i = 0; i < kNumIters; i++) {
         this->lock_.Lock();
         this->lock_.Lock();
         EXPECT_TRUE(this->lock_.TryLock());
@@ -91,7 +90,7 @@ TYPED_TEST(LockTest, NonRecursiveManyThreadsTest) {
   std::vector<std::thread> threads;
   for (int i = 0; i < kManyThreads; i++) {
     threads.emplace_back([&]() {
-      for (int i = 0; i < 128 * 1024; i++) {
+      for (int i = 0; i < kNumIters; i++) {
         this->non_recursive_.Lock();
         EXPECT_FALSE(this->non_recursive_.TryLock());
         EXPECT_EQ(shared_counter, 0);

@@ -14,17 +14,17 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKEND_TAGS")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])
 
 package(
     default_visibility = ["//asylo:implementation"],
 )
 
 exports_files(["LICENSE"])
-
-load("@linux_sgx//:sgx_sdk.bzl", "sgx_enclave_configuration")
-load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKENDS", "cc_enclave_test")
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 
 # Core untrusted Asylo components.
 cc_library(
@@ -33,20 +33,30 @@ cc_library(
         "enclave_config_util.cc",
         "enclave_config_util.h",
         "enclave_manager.cc",
+        "generic_enclave_client.cc",
     ],
     hdrs = [
         "enclave_client.h",
         "enclave_manager.h",
+        "generic_enclave_client.h",
     ],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
+        ":entry_selectors",
         ":shared_name",
         ":shared_resource_manager",
         "//asylo:enclave_cc_proto",
-        "//asylo/platform/arch:fork_cc_proto",
         "//asylo/platform/common:time_util",
+        "//asylo/platform/host_call:host_call_handlers_initializer",
+        "//asylo/platform/primitives",
+        "//asylo/platform/primitives:enclave_loader",
+        "//asylo/platform/primitives:untrusted_primitives",
+        "//asylo/platform/primitives/sgx:loader_cc_proto",
+        "//asylo/platform/primitives/sgx:untrusted_sgx",
+        "//asylo/platform/primitives/util:message_reader_writer",
         "//asylo/util:logging",
         "//asylo/util:status",
+        "//asylo/util:status_macros",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
@@ -56,7 +66,7 @@ cc_library(
     ],
 )
 
-# Default implementation of EnclaveClient.
+# Enclave entry selectors.
 cc_library(
     name = "entry_selectors",
     hdrs = [
@@ -65,27 +75,6 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         "//asylo/platform/primitives",
-    ],
-)
-
-# Default implementation of EnclaveClient.
-cc_library(
-    name = "generic_enclave_client",
-    srcs = [
-        "generic_enclave_client.cc",
-    ],
-    hdrs = [
-        "generic_enclave_client.h",
-    ],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":entry_selectors",
-        ":untrusted_core",
-        "//asylo:enclave_cc_proto",
-        "//asylo/platform/primitives",
-        "//asylo/platform/primitives:untrusted_primitives",
-        "//asylo/util:status",
-        "//asylo/util:status_macros",
     ],
 )
 
@@ -99,7 +88,7 @@ cc_library(
     hdrs = ["trusted_global_state.h"],
     copts = ASYLO_DEFAULT_COPTS,
     linkstatic = 1,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         "//asylo:enclave_cc_proto",
         "//asylo/util:status",
@@ -117,7 +106,7 @@ cc_library(
     ],
     copts = ASYLO_DEFAULT_COPTS,
     linkstatic = 1,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         ":shared_name",
         ":trusted_global_state",
@@ -135,38 +124,53 @@ cc_library(
     hdrs = ["trusted_application.h"],
     copts = ASYLO_DEFAULT_COPTS,
     linkstatic = 1,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
         ":entry_points",
         ":entry_selectors",
         ":shared_name",
         ":trusted_core",
-        ":untrusted_cache_malloc",
         "//asylo:enclave_cc_proto",
         "//asylo/identity:init",
-        "//asylo/platform/arch:fork_cc_proto",
         "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/arch:trusted_fork",
+        "//asylo/platform/common:enclave_state",
         "//asylo/platform/posix/io:io_manager",
         "//asylo/platform/posix/signal:signal_manager",
         "//asylo/platform/posix/threading:thread_manager",
         "//asylo/platform/primitives",
+        "//asylo/platform/primitives:trusted_backend",
         "//asylo/platform/primitives:trusted_primitives",
         "//asylo/platform/primitives:trusted_runtime",
+        "//asylo/platform/primitives/sgx:fork_cc_proto",
+        "//asylo/platform/primitives/util:message_reader_writer",
         "//asylo/platform/primitives/util:status_conversions",
+        "//asylo/platform/primitives/util:status_serializer",
         "//asylo/util:logging",
         "//asylo/util:status",
         "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
+    ],
+    alwayslink = 1,
+)
+
+# Make sure that the specialized atomic wrappers are only visible to
+# our low level synchronization primitives, and aren't reused incorrectly.
+package_group(
+    name = "synchronization_primitives",
+    packages = [
+        "//asylo/platform/core/trusted_mutex",
+        "//asylo/platform/core/trusted_spin_lock",
+        "//asylo/platform/posix",
     ],
 )
 
-# Atomic utility functions.
+# Atomic utility functions. Highly specialized for a few specific use
+# cases, not intended to be reused without extensive understanding of
+# memory orderings. Extremely narrow visibility is on purpose.
 cc_library(
     name = "atomic",
     hdrs = ["atomic.h"],
     copts = ASYLO_DEFAULT_COPTS,
+    visibility = [":synchronization_primitives"],
 )
 
 # Enclave entry points.
@@ -177,22 +181,9 @@ cc_library(
 )
 
 # An untrusted mutex object which depends on host kernel resources.
-cc_library(
-    name = "untrusted_mutex",
-    srcs = [
-        "untrusted_mutex.cc",
-    ],
-    hdrs = [
-        "untrusted_mutex.h",
-    ],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":atomic",
-        ":untrusted_cache_malloc",
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/primitives:trusted_backend",
-    ],
-)
+_untrusted_mutex_sgx_deps = [
+    "//asylo/platform/primitives/sgx:trusted_sgx",
+]
 
 # An trusted spin lock object.
 cc_library(
@@ -206,8 +197,8 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":atomic",
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/primitives:trusted_backend",
+        "//asylo/platform/primitives:trusted_primitives",
+        "//asylo/platform/primitives:trusted_runtime",
     ],
 )
 
@@ -242,73 +233,10 @@ cc_library(
     srcs = ["trusted_mutex.cc"],
     hdrs = ["trusted_mutex.h"],
     copts = ASYLO_DEFAULT_COPTS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     deps = [
+        ":atomic",
         ":trusted_spin_lock",
-        ":untrusted_mutex",
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/primitives:trusted_backend",
-    ],
-)
-
-# Sanity check test for enclave clock variables.
-cc_test(
-    name = "enclave_clock_test",
-    srcs = ["enclave_clock_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    tags = [
-    ],
-    deps = [
-        ":shared_resource_manager",
-        ":untrusted_core",
-        "//asylo/platform/common:time_util",
-        "//asylo/test/util:test_main",
-        "//asylo/util:status",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest",
-    ],
-)
-
-# Singleton class responsible for allocating shared buffers between trusted
-# and untrusted code.
-cc_library(
-    name = "untrusted_cache_malloc",
-    srcs = ["untrusted_cache_malloc.cc"],
-    hdrs = ["untrusted_cache_malloc.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        "//asylo/platform/arch:trusted_arch",
-        "//asylo/platform/common:memory",
-        "//asylo/platform/common:spin_lock",
-        "//asylo/platform/primitives:trusted_backend",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/memory",
-    ],
-)
-
-sgx_enclave_configuration(
-    name = "many_threads_enclave_config",
-    tcs_num = "1000",
-)
-
-cc_enclave_test(
-    name = "untrusted_cache_malloc_test",
-    srcs = ["untrusted_cache_malloc_test.cc"],
-    copts = ASYLO_DEFAULT_COPTS,
-    enclave_config = ":many_threads_enclave_config",
-    deps = [
-        "//asylo/platform/core:untrusted_cache_malloc",
-        "@com_google_googletest//:gtest",
-    ],
-)
-
-cc_library(
-    name = "bridge_msghdr_wrapper",
-    srcs = ["bridge_msghdr_wrapper.cc"],
-    hdrs = ["bridge_msghdr_wrapper.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        ":untrusted_cache_malloc",
-        "//asylo/platform/common:bridge_types",
-        "//asylo/platform/primitives:trusted_backend",
+        "//asylo/platform/host_call",
     ],
 )

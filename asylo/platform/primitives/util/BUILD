@@ -14,17 +14,20 @@
 # limitations under the License.
 #
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
 licenses(["notice"])  # Apache v2.0
 
 package(
     default_visibility = ["//asylo:implementation"],
 )
 
-exports_files([
-    "trusted_memory.h",
-])
-
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+cc_library(
+    name = "trusted_memory",
+    hdrs = ["trusted_memory.h"],
+    deps = ["//asylo/platform/primitives:trusted_primitives"],
+)
 
 # Utilities for conversions between Asylo Status and PrimitiveStatus.
 cc_library(
@@ -35,6 +38,7 @@ cc_library(
     deps = [
         "//asylo/platform/primitives",
         "//asylo/util:status",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -45,17 +49,8 @@ cc_test(
     deps = [
         ":status_conversions",
         "//asylo/test/util:test_main",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
-    ],
-)
-
-# Utilities for working with primitive locks.
-cc_library(
-    name = "primitive_locks",
-    hdrs = ["primitive_locks.h"],
-    copts = ASYLO_DEFAULT_COPTS,
-    deps = [
-        "//asylo/platform/primitives/x86:spin_lock",
     ],
 )
 
@@ -66,12 +61,28 @@ cc_library(
     hdrs = ["dispatch_table.h"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
-        "//asylo/platform/primitives",
+        ":message_reader_writer",
         "//asylo/platform/primitives:untrusted_primitives",
         "//asylo/util:asylo_macros",
         "//asylo/util:mutex_guarded",
+        "//asylo/util:status",
+        "//asylo/util:status_macros",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+# Exit call hooks which log every exit call
+cc_library(
+    name = "exit_log",
+    srcs = ["exit_log.cc"],
+    hdrs = ["exit_log.h"],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        ":dispatch_table",
+        "//asylo/util:status",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -81,10 +92,10 @@ cc_test(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":dispatch_table",
-        "//asylo/platform/primitives",
         "//asylo/platform/primitives:untrusted_primitives",
         "//asylo/test/util:status_matchers",
         "//asylo/test/util:test_main",
+        "//asylo/util:status",
         "//asylo/util:thread",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/time",
@@ -100,11 +111,13 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     visibility = ["//asylo:implementation"],
     deps = [
-        ":primitive_locks",
+        ":message_reader_writer",
+        "//asylo/platform/core:trusted_spin_lock",
         "//asylo/platform/primitives",
         "//asylo/platform/primitives:trusted_primitives",
         "//asylo/platform/primitives:trusted_runtime",
-        "//asylo/platform/primitives/x86:spin_lock",
+        "//asylo/util:lock_guard",
+        "//asylo/util:status_macros",
     ],
 )
 
@@ -114,6 +127,8 @@ cc_library(
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         "//asylo/platform/primitives",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -126,6 +141,20 @@ cc_test(
     deps = [
         ":message_reader_writer",
         "//asylo/test/util:test_main",
+        "@com_google_absl//absl/memory",
         "@com_google_googletest//:gtest",
+    ],
+)
+
+# Status serializer.
+cc_library(
+    name = "status_serializer",
+    hdrs = [
+        "status_serializer.h",
+    ],
+    copts = ASYLO_DEFAULT_COPTS,
+    deps = [
+        "//asylo/platform/primitives:trusted_primitives",
+        "//asylo/util:status",
     ],
 )

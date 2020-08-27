@@ -18,75 +18,124 @@
 
 #include "asylo/platform/primitives/util/message.h"
 
+#include <cstddef>
 #include <memory>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/memory/memory.h"
 
 using ::testing::Eq;
+using ::testing::IsEmpty;
+using ::testing::Not;
+using ::testing::SizeIs;
 using ::testing::StrEq;
 
 namespace asylo {
 namespace primitives {
 namespace {
 
-constexpr size_t kNumParams = 10;
+constexpr size_t kNumBuffer = 10;
+
+// Builds a MessageReader from |writer|.
+MessageReader BuildMessageReader(const MessageWriter &writer) {
+  const size_t size = writer.MessageSize();
+  const auto buffer = absl::make_unique<char[]>(size);
+  writer.Serialize(buffer.get());
+
+  MessageReader reader;
+  reader.Deserialize(buffer.get(), size);
+  return reader;
+}
+
+TEST(MessageTest, NullReaderTest) {
+  MessageReader reader;
+  EXPECT_THAT(reader, IsEmpty());
+  EXPECT_THAT(reader, SizeIs(0));
+}
 
 TEST(MessageTest, EmptyWriterReaderTest) {
   MessageWriter writer;
-  EXPECT_TRUE(writer.empty());
-  EXPECT_THAT(writer.size(), Eq(0));
+  EXPECT_THAT(writer, IsEmpty());
+  EXPECT_THAT(writer, SizeIs(0));
 
-  size_t message_len = writer.MessageSize();
-  void *message = malloc(message_len);
-  writer.Write(message);
+  const size_t size = writer.MessageSize();
+  const auto buffer = absl::make_unique<char[]>(size);
+  writer.Serialize(buffer.get());
 
-  MessageReader reader(message, message_len);
-  free(message);
-  EXPECT_THAT(reader.size(), Eq(0));
+  MessageReader reader;
+  reader.Deserialize(buffer.get(), size);
+  EXPECT_THAT(reader, IsEmpty());
+  EXPECT_THAT(reader, SizeIs(0));
 }
 
 TEST(MessageTest, PushPopDataByValue) {
   MessageWriter writer;
-  writer.PushByCopy(Extent{"hello", strlen("hello") + 1});
-  writer.PushByCopy(Extent{"world", strlen("world") + 1});
   writer.Push(1);
   writer.Push(2);
+  writer.PushByCopy(Extent{"hello", strlen("hello") + 1});
+  writer.PushByCopy(Extent{"world", strlen("world") + 1});
 
-  EXPECT_FALSE(writer.empty());
-  EXPECT_THAT(writer.size(), Eq(4));
+  EXPECT_THAT(writer, Not(IsEmpty()));
+  EXPECT_THAT(writer, SizeIs(4));
 
-  size_t message_len = writer.MessageSize();
-  void *message = malloc(message_len);
-  writer.Write(message);
+  const size_t size = writer.MessageSize();
+  auto buffer = absl::make_unique<char[]>(size);
+  writer.Serialize(buffer.get());
 
-  MessageReader reader(message, message_len);
-  free(message);
+  MessageReader reader;
+  reader.Deserialize(buffer.get(), size);
 
-  EXPECT_THAT(reader.size(), Eq(4));
+  ASSERT_THAT(reader, Not(IsEmpty()));
+  ASSERT_THAT(reader, SizeIs(4));
+  EXPECT_THAT(reader.peek<int>(), Eq(1));
+  EXPECT_THAT(*(reader.next().As<int>()), Eq(1));
+  EXPECT_THAT(reader.peek<int>(), Eq(2));
+  EXPECT_THAT(*(reader.next().As<int>()), Eq(2));
   EXPECT_THAT(reader.next().As<char>(), StrEq("hello"));
   EXPECT_THAT(reader.next().As<char>(), StrEq("world"));
-  EXPECT_THAT(*(reader.next().As<int>()), Eq(1));
-  EXPECT_THAT(*(reader.next().As<int>()), Eq(2));
+  EXPECT_THAT(reader.hasNext(), Eq(false));
+}
+
+TEST(MessageTest, ExtendMessageWriterFromOther) {
+  MessageWriter writer, other;
+  for (int i = 0; i < kNumBuffer / 2; ++i) {
+    writer.Push(i);                  // 0, 1, 2, 3, 4
+    other.Push(kNumBuffer / 2 + i);  // 5, 6, 7, 8, 9
+  }
+
+  writer.Extend(other);
+
+  MessageReader reader = BuildMessageReader(writer);
+
+  ASSERT_THAT(reader, Not(IsEmpty()));
+  ASSERT_THAT(reader, SizeIs(kNumBuffer));
+  for (int i = 0; i < kNumBuffer; ++i) {
+    ASSERT_TRUE(reader.hasNext());
+    EXPECT_THAT(reader.peek<int>(), Eq(i));
+    EXPECT_THAT(reader.next<int>(), Eq(i));
+  }
 }
 
 TEST(MessageTest, PushPopNums) {
   MessageWriter writer;
-  for (int i = 0; i < kNumParams; ++i) {
+  for (int i = 0; i < kNumBuffer; ++i) {
     writer.Push(i);
   }
-  EXPECT_FALSE(writer.empty());
-  EXPECT_THAT(writer.size(), Eq(kNumParams));
+  EXPECT_THAT(writer, Not(IsEmpty()));
+  EXPECT_THAT(writer, SizeIs(kNumBuffer));
 
-  size_t message_len = writer.MessageSize();
-  void *message = malloc(message_len);
-  writer.Write(message);
+  const size_t size = writer.MessageSize();
+  const auto buffer = absl::make_unique<char[]>(size);
+  writer.Serialize(buffer.get());
 
-  MessageReader reader(message, message_len);
-  free(message);
+  MessageReader reader;
+  reader.Deserialize(buffer.get(), size);
 
-  EXPECT_THAT(reader.size(), Eq(kNumParams));
-  for (int i = 0; i < kNumParams; ++i) {
+  ASSERT_THAT(reader, Not(IsEmpty()));
+  ASSERT_THAT(reader, SizeIs(kNumBuffer));
+  for (int i = 0; i < kNumBuffer; ++i) {
+    ASSERT_TRUE(reader.hasNext());
     EXPECT_THAT(*(reader.next().As<int>()), Eq(i));
   }
 }
@@ -98,42 +147,48 @@ TEST(MessageTest, PushByReferenceTest) {
   writer.PushByReference(Extent{hello, strlen(hello) + 1});
   writer.PushByReference(Extent{world, strlen(world) + 1});
 
-  EXPECT_FALSE(writer.empty());
-  EXPECT_THAT(writer.size(), Eq(2));
+  EXPECT_THAT(writer, Not(IsEmpty()));
+  EXPECT_THAT(writer, SizeIs(2));
 
-  size_t message_len = writer.MessageSize();
-  void *message = malloc(message_len);
-  writer.Write(message);
+  const size_t size = writer.MessageSize();
+  const auto buffer = absl::make_unique<char[]>(size);
+  writer.Serialize(buffer.get());
 
-  MessageReader reader(message, message_len);
-  free(message);
+  MessageReader reader;
+  reader.Deserialize(buffer.get(), size);
 
-  EXPECT_THAT(reader.size(), Eq(2));
+  ASSERT_THAT(reader, Not(IsEmpty()));
+  ASSERT_THAT(reader, SizeIs(2));
   EXPECT_THAT(reader.next().As<char>(), StrEq(hello));
   EXPECT_THAT(reader.next().As<char>(), StrEq(world));
+  EXPECT_THAT(reader.hasNext(), Eq(false));
 }
 
+// Ensure we can read and write strings, both for std::string and string
+// literals.
 TEST(MessageTest, PushPopStrings) {
   MessageWriter writer;
-  std::string hello("hello"), world("world");
-  writer.Push(hello);
-  writer.Push(world);
+  writer.PushString(std::string("hello"));
+  writer.PushString(std::string("world"));
+  writer.PushString("goodnight");
+  writer.PushString("moon");
+  EXPECT_THAT(writer, Not(IsEmpty()));
+  EXPECT_THAT(writer, SizeIs(4));
 
-  EXPECT_FALSE(writer.empty());
-  EXPECT_THAT(writer.size(), Eq(2));
+  const size_t size = writer.MessageSize();
+  const auto buffer = absl::make_unique<char[]>(size);
+  writer.Serialize(buffer.get());
 
-  size_t message_len = writer.MessageSize();
-  void *message = malloc(message_len);
-  writer.Write(message);
+  MessageReader reader;
+  reader.Deserialize(buffer.get(), size);
 
-  MessageReader reader(message, message_len);
-  free(message);
-
-  EXPECT_THAT(reader.size(), Eq(2));
-  EXPECT_THAT(reader.next().As<char>(), StrEq(hello));
-  EXPECT_THAT(reader.next().As<char>(), StrEq(world));
+  ASSERT_THAT(reader, Not(IsEmpty()));
+  ASSERT_THAT(reader, SizeIs(4));
+  EXPECT_THAT(reader.next().As<char>(), StrEq("hello"));
+  EXPECT_THAT(reader.next().As<char>(), StrEq("world"));
+  EXPECT_THAT(reader.next().As<char>(), StrEq("goodnight"));
+  EXPECT_THAT(reader.next().As<char>(), StrEq("moon"));
 }
-
 
 }  // namespace
 }  // namespace primitives

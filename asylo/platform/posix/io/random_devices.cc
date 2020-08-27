@@ -20,11 +20,17 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>  // Only included for the transitional define.
+#if __has_include(<linux/random.h>)
+#include <linux/random.h>
+#endif
 #include <string.h>
 #include <sys/sysmacros.h>
 
 #include "absl/memory/memory.h"
-#include "asylo/platform/arch/include/trusted/hardware_random.h"
+#include "asylo/platform/host_call/trusted/host_calls.h"
+#include "asylo/platform/primitives/random_bytes.h"
+#include "asylo/platform/primitives/trusted_runtime.h"
 
 namespace asylo {
 namespace {
@@ -58,6 +64,10 @@ int GetStat(struct stat *stat_buffer, bool is_urandom) {
 }  // namespace
 
 ssize_t RandomIOContext::Read(void *buf, size_t count) {
+  if (fd_ >= 0) {
+    // If RDRAND isn't supported, then fall back on the host's randomness.
+    return enc_untrusted_read(fd_, buf, count);
+  }
   // Delegate to architecture-specific implementation to generate random numbers
   return enc_hardware_random(reinterpret_cast<uint8_t *>(buf), count);
 }
@@ -69,7 +79,9 @@ ssize_t RandomIOContext::Write(const void *buf, size_t count) {
 }
 
 int RandomIOContext::Close() {
-  // Nothing to do.
+  if (fd_ >= 0) {
+    return enc_untrusted_close(fd_);
+  }
   return 0;
 }
 
@@ -92,12 +104,44 @@ int RandomIOContext::Isatty() {
   return 0;
 }
 
+int RandomIOContext::Ioctl(int request, void *argp) {
+  switch (request) {
+    #ifdef RNDGETENTCNT
+      case RNDGETENTCNT: {
+      int result = enc_hardware_random_entropy();
+      if (result) {
+        return result;
+      }
+      return enc_untrusted_syscall(asylo::system_call::kSYS_ioctl, request,
+                                   argp);
+    }
+    #endif
+    #ifdef RNDINENCLAVE
+    // Nonstandard request to random device fd for cwd_test.
+    case RNDINENCLAVE: {
+      return 0;
+    }
+    #endif
+  default:
+    errno = EINVAL;
+    return -1;
+  }
+}
+
 std::unique_ptr<io::IOManager::IOContext> RandomPathHandler::Open(
     const char *path, int flags, mode_t mode) {
   bool is_random = strcmp(path, kRandomPath) == 0;
   bool is_urandom = strcmp(path, kURandomPath) == 0;
   if (is_random || is_urandom) {
-    return ::absl::make_unique<RandomIOContext>(is_urandom);
+    int fd = -1;
+    if (!rdrand_supported()) {
+        fd = enc_untrusted_open(path, flags, mode);
+        if (fd < 0) {
+          return nullptr;
+        }
+    }
+    errno = 0;
+    return ::absl::make_unique<RandomIOContext>(is_urandom, fd);
   }
 
   errno = ENOENT;

@@ -21,35 +21,30 @@
 
 #include <memory>
 
-#include "asylo/platform/primitives/trusted_runtime.h"
-
-// Forward declaration of the API exposed by UntrustedCacheMalloc which allows
-// C code to depend on the global memory pool singleton. This forward
-// declaration is required here to break the cyclic dependencies between
-// platform/arch and platform/core.
-extern "C" void untrusted_cache_free(void *buffer);
+#include "asylo/platform/primitives/trusted_primitives.h"
 
 namespace asylo {
+namespace primitives {
 
-// Deleter for untrusted memory for use with std::unique_ptr. Calls
-// untrusted_cache_free() internally.
-struct UntrustedDeleter {
-  inline void operator()(void *ptr) const { untrusted_cache_free(ptr); }
-};
-
-template <typename T>
-using UntrustedUniquePtr = std::unique_ptr<T, UntrustedDeleter>;
-
-// Checks whether |pointer| is not nullptr and is within the enclave. Returns
-// true if the pointer is valid; false if not.
+// Checks whether |pointer| is not nullptr and points to an object located in
+// memory inside the enclave. Returns true if the pointer is valid; false if
+// not.
 template <typename T>
 bool IsValidEnclaveAddress(const T *pointer) {
-  if (pointer == nullptr || !enc_is_within_enclave(pointer, sizeof(*pointer))) {
-    return false;
-  }
-  return true;
+  return pointer != nullptr &&
+         primitives::TrustedPrimitives::IsInsideEnclave(pointer, sizeof(T));
 }
 
+// Checks whether |pointer| is not nullptr and points to an object located in
+// memory outside the enclave. Returns true if the pointer is valid; false if
+// not.
+template <typename T>
+bool IsValidUntrustedAddress(const T *pointer) {
+  return pointer != nullptr &&
+         primitives::TrustedPrimitives::IsOutsideEnclave(pointer, sizeof(T));
+}
+
+}  // namespace primitives
 }  // namespace asylo
 
 #endif  // ASYLO_PLATFORM_PRIMITIVES_UTIL_TRUSTED_MEMORY_H_

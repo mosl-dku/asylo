@@ -16,8 +16,10 @@
  *
  */
 
+#include <atomic>
 #include <cstdlib>
 
+#include "asylo/platform/core/atomic.h"
 #include "asylo/platform/primitives/trusted_runtime.h"
 
 // The newlib implementation of malloc and free in mallocr.c depends on symbols
@@ -45,24 +47,24 @@ void __malloc_lock(struct reent *) {
   const uint64_t self = enc_thread_self();
 
   while (lock_owner != self) {
-    uint64_t prev = 0;
+    uint64_t unlocked_value = kInvalidThread;
 
     // Attempt to acquire the mutex by swapping the lock with the current thread
     // id, specifying strong memory ordering to avoid unexpected memory
     // ordering. Try to obtain the lock by atomically testing that it is
     // unlocked and exchanging it with our thread id.
-    if (__atomic_compare_exchange_n(&lock_owner,
-                                    /*expected=*/&prev,
-                                    /*desired=*/self,
-                                    /*weak=*/false,
-                                    /*success_memorder=*/__ATOMIC_SEQ_CST,
-                                    /*failure_memorder=*/__ATOMIC_SEQ_CST) !=
-        kInvalidThread) {
+    if (asylo::AtomicCompareExchange<uint64_t>(
+            &lock_owner,
+            /*expected=*/&unlocked_value,
+            /*desired=*/self,
+            /*weak=*/true,
+            /*success_memorder=*/std::memory_order_acquire,
+            /*failure_memorder=*/std::memory_order_relaxed)) {
       break;
     }
 
     // If the lock is not free, avoid doing a synchronized read and busy wait
-    // until it's release then try to obtain it again.
+    // until it's released then try to obtain it again.
     while (lock_owner != kInvalidThread) {
       // Issue a busy-wait hint to the CPU if possible.
       enc_pause();
@@ -81,9 +83,8 @@ void __malloc_unlock(struct reent *) {
 
   lock_count--;
   if (lock_count == 0) {
-    // Release the lock with an atomic store. __ATOMIC_RELEASE ensures this
-    // write is visible to threads obtaining the lock with __ATOMIC_SEQ_CST.
-    __atomic_store_n(&lock_owner, kInvalidThread, __ATOMIC_RELEASE);
+    // Release the lock with an atomic store.
+    asylo::AtomicStore(&lock_owner, kInvalidThread, std::memory_order_release);
   }
 }
 

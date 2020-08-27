@@ -22,15 +22,18 @@
 
 #include <gtest/gtest.h>
 #include "absl/memory/memory.h"
-#include "asylo/enclave_manager.h"
+#include "asylo/platform/host_call/untrusted/host_call_handlers_initializer.h"
 #include "asylo/platform/primitives/examples/hello_enclave.h"
 #include "asylo/platform/primitives/extent.h"
 #include "asylo/platform/primitives/test/test_backend.h"
 #include "asylo/platform/primitives/untrusted_primitives.h"
-#include "asylo/platform/primitives/util/dispatch_table.h"
+#include "asylo/platform/primitives/util/message.h"
 #include "asylo/test/util/status_matchers.h"
 #include "asylo/util/status_macros.h"
 #include "asylo/util/statusor.h"
+
+using ::testing::SizeIs;
+using ::testing::StrEq;
 
 namespace asylo {
 namespace primitives {
@@ -40,40 +43,39 @@ class HelloTest : public ::testing::Test {
  protected:
   // Loads an instance of a test enclave, aborting on failure.
   void SetUp() override {
-    EnclaveManager::Configure(EnclaveManagerOptions());
-    client_ = test::TestBackend::Get()->LoadTestEnclaveOrDie(
-        /*enclave_name=*/"hello_test", absl::make_unique<DispatchTable>());
+    client_ = test::TestBackend::Get()->LoadTestEnclaveOrDie("hello_test");
+    ASSERT_FALSE(client_->IsClosed());
+
+    ASYLO_EXPECT_OK(host_call::AddHostCallHandlersToExitCallProvider(
+        client_->exit_call_provider()));
     ASYLO_EXPECT_OK(client_->exit_call_provider()->RegisterExitHandler(
-       kExternalHelloHandler, ExitHandler{test_handler}));
+        kExternalHelloHandler, ExitHandler{HelloHandler}));
   }
 
   void TearDown() override {
     ASYLO_EXPECT_OK(client_->Destroy());
+    ASSERT_TRUE(client_->IsClosed());
   }
 
   std::shared_ptr<Client> client_;
 
  private:
-  // When the enclave asks for it, send "Test"
-  static Status test_handler(std::shared_ptr<Client> client, void *context,
-                             NativeParameterStack *params) {
-    static std::array<char, 4> test_data{{'T', 'e', 's', 't'}};
-    // Push our message on to the parameter stack to pass to the enclave
-    params->PushByCopy(Extent{test_data.data(), test_data.size()});
+  // When the enclave asks for it, send "Hello".
+  static Status HelloHandler(std::shared_ptr<Client> client, void *context,
+                             MessageReader *in, MessageWriter *out) {
+    ASYLO_RETURN_IF_READER_NOT_EMPTY(*in);
+
+    // Push our message on to the MessageWriter to pass to the enclave.
+    out->PushString("Hello");
     return Status::OkStatus();
   }
 };
 
 TEST_F(HelloTest, Hello) {
-  NativeParameterStack params;
-  auto status = client_->EnclaveCall(kHelloEnclaveSelector, &params);
-  EXPECT_FALSE(params.empty());
-  auto message = params.Pop();
-  EXPECT_TRUE(params.empty());
-  const char *message_cstr = reinterpret_cast<const char *>(message->data());
-  std::string message_string(message_cstr);
-  EXPECT_THAT(message_string, ::testing::StrEq("Test, World!"));
-  EXPECT_THAT(status, IsOk());
+  MessageReader out;
+  ASYLO_ASSERT_OK(client_->EnclaveCall(kHelloEnclaveSelector, nullptr, &out));
+  EXPECT_THAT(out, SizeIs(1));
+  EXPECT_THAT(out.next().As<char>(), StrEq("Hello, World!"));
 }
 
 }  // namespace test

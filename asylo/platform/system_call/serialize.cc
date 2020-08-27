@@ -40,8 +40,7 @@ typename T::value_type Sum(const T &values) {
 
 primitives::PrimitiveStatus SerializeRequest(
     int sysno, const std::array<uint64_t, kParameterMax> &parameters,
-    primitives::Extent *request,
-    const primitives::ExtentAllocator &request_allocator) {
+    primitives::Extent *request) {
   SystemCallDescriptor descriptor{sysno};
   if (!descriptor.is_valid()) {
     return primitives::PrimitiveStatus{
@@ -53,21 +52,16 @@ primitives::PrimitiveStatus SerializeRequest(
   auto writer = MessageWriter::RequestWriter(sysno, parameters);
   size_t size = writer.MessageSize();
 
-  if (request_allocator == nullptr) {
-    *request = {reinterpret_cast<uint8_t *>(malloc(size)), size};
-  } else {
-    *request = request_allocator(size);
-  }
+  *request = {reinterpret_cast<uint8_t *>(malloc(size)), size};
 
   writer.Write(request);
   return primitives::PrimitiveStatus::OkStatus();
 }
 
 primitives::PrimitiveStatus SerializeResponse(
-    int sysno, uint64_t result,
+    int sysno, uint64_t result, uint64_t error_number,
     const std::array<uint64_t, kParameterMax> &parameters,
-    primitives::Extent *response,
-    const primitives::ExtentAllocator &response_allocator) {
+    primitives::Extent *response) {
   SystemCallDescriptor descriptor{sysno};
 
   if (!descriptor.is_valid()) {
@@ -77,14 +71,11 @@ primitives::PrimitiveStatus SerializeResponse(
                      sysno, ") provided.")};
   }
 
-  auto writer = MessageWriter::ResponseWriter(sysno, result, parameters);
+  auto writer =
+      MessageWriter::ResponseWriter(sysno, result, error_number, parameters);
   size_t size = writer.MessageSize();
 
-  if (response_allocator == nullptr) {
-    *response = {reinterpret_cast<uint8_t *>(malloc(size)), size};
-  } else {
-    *response = response_allocator(size);
-  }
+  *response = {reinterpret_cast<uint8_t *>(malloc(size)), size};
 
   writer.Write(response);
   return primitives::PrimitiveStatus::OkStatus();

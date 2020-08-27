@@ -14,18 +14,21 @@
 # limitations under the License.
 #
 
-licenses(["notice"])  # Apache v2.0
-
-load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKENDS", "cc_test")
-load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 load("@linux_sgx//:sgx_sdk.bzl", "sgx_enclave_configuration")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("//asylo/bazel:asylo.bzl", "ASYLO_ALL_BACKEND_TAGS", "cc_test")
+load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
+
+licenses(["notice"])  # Apache v2.0
 
 # An enclave configuration that should keep up with gRPC's resource usage.
 sgx_enclave_configuration(
     name = "grpc_enclave_config",
-    # gRPC needs more than the default amount of heap to run. ~1.2GB.
-    heap_max_size = "0x47000000",
-    tcs_num = "200",
+    # Allocate additional thread control structures, as we assume gRPC
+    # workloads will be more heavily threaded than workloads which do not
+    # use gRPC.
+    tcs_num = "32",
     visibility = ["//visibility:public"],
 )
 
@@ -88,7 +91,7 @@ cc_library(
     name = "enclave_server",
     hdrs = ["enclave_server.h"],
     copts = ASYLO_DEFAULT_COPTS,
-    tags = ASYLO_ALL_BACKENDS,
+    tags = ASYLO_ALL_BACKEND_TAGS,
     visibility = ["//visibility:public"],
     deps = [
         ":enclave_server_cc_proto",

@@ -20,18 +20,19 @@
 
 #include <memory>
 
+#include "absl/types/optional.h"
+#include "asylo/platform/primitives/util/message.h"
+#include "asylo/util/status.h"
+#include "asylo/util/status_macros.h"
+
 namespace asylo {
 namespace primitives {
 
-// Registers a callback as the handler routine for an enclave exit point
-// `untrusted_selector`. Returns an error code if a handler has already been
-// registered for `trusted_selector` or if an invalid selector value is
-// passed.
 Status DispatchTable::RegisterExitHandler(uint64_t untrusted_selector,
                                           const ExitHandler &handler) {
   // Ensure no handler is installed for untrusted_selector.
   auto locked_exit_table = exit_table_.Lock();
-  if (locked_exit_table->contains(untrusted_selector)) {
+  if (locked_exit_table->count(untrusted_selector)) {
     return {error::GoogleError::ALREADY_EXISTS,
             "Invalid selector in RegisterExitHandler."};
   }
@@ -39,21 +40,44 @@ Status DispatchTable::RegisterExitHandler(uint64_t untrusted_selector,
   return Status::OkStatus();
 }
 
-// Finds and invokes an exit handler, setting an error status on failure.
-Status DispatchTable::InvokeExitHandler(uint64_t untrusted_selector,
-                                        NativeParameterStack *params,
-                                        Client *client) {
-  ExitHandler handler;
+Status DispatchTable::PerformUnknownExit(uint64_t untrusted_selector,
+                                         MessageReader *input,
+                                         MessageWriter *output,
+                                         Client *client) {
+  return {error::GoogleError::OUT_OF_RANGE,
+          "Invalid selector in enclave exit."};
+}
+
+Status DispatchTable::PerformExit(uint64_t untrusted_selector,
+                                  MessageReader *input, MessageWriter *output,
+                                  Client *client) {
+  absl::optional<ExitHandler> handler;
   {
     auto locked_exit_table = exit_table_.ReaderLock();
     auto it = locked_exit_table->find(untrusted_selector);
-    if (it == locked_exit_table->end()) {
-      return {error::GoogleError::OUT_OF_RANGE,
-              "Invalid selector in enclave exit."};
+    if (it != locked_exit_table->end()) {
+      handler = it->second;
     }
-    handler = it->second;
   }
-  return handler.callback(client->shared_from_this(), handler.context, params);
+  if (!handler.has_value()) {
+    return PerformUnknownExit(untrusted_selector, input, output, client);
+  }
+  return handler.value().callback(client->shared_from_this(),
+                                  handler.value().context, input, output);
+}
+
+// Finds and invokes an exit handler, setting an error status on failure.
+Status DispatchTable::InvokeExitHandler(uint64_t untrusted_selector,
+                                        MessageReader *input,
+                                        MessageWriter *output, Client *client) {
+  if (exit_hook_factory_) {
+    auto hook = exit_hook_factory_->CreateExitHook();
+    ASYLO_RETURN_IF_ERROR(hook->PreExit(untrusted_selector));
+    return hook->PostExit(
+        PerformExit(untrusted_selector, input, output, client));
+  } else {
+    return PerformExit(untrusted_selector, input, output, client);
+  }
 }
 
 }  // namespace primitives

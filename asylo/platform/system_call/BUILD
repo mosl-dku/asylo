@@ -14,6 +14,8 @@
 # limitations under the License.
 #
 
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_python//python:defs.bzl", "py_binary")
 load("//asylo/bazel:copts.bzl", "ASYLO_DEFAULT_COPTS")
 
 licenses(["notice"])  # Apache v2.0
@@ -34,7 +36,7 @@ genrule(
     srcs = ["syscalls.txt"],
     outs = ["syscalls.inc"],
     cmd = "$(location preprocess) < $(<) > $(@)",
-    tools = [":preprocess"],
+    exec_tools = [":preprocess"],
 )
 
 # Code generator utility for building static C++ tables describing
@@ -97,7 +99,6 @@ cc_library(
     deps = [
         ":metadata",
         "//asylo/platform/primitives",
-        "//asylo/platform/primitives:trusted_primitives",
         "//asylo/util:status_macros",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
@@ -134,6 +135,7 @@ cc_library(
         ":message",
         ":metadata",
         "//asylo/platform/primitives",
+        "//asylo/platform/system_call/type_conversions",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -174,12 +176,14 @@ cc_library(
 
 cc_test(
     name = "system_call_test",
+    size = "medium",
     srcs = ["system_call_test.cc"],
     copts = ASYLO_DEFAULT_COPTS,
     deps = [
         ":system_call",
         ":untrusted_invoke",
         "//asylo/platform/primitives:untrusted_primitives",
+        "//asylo/platform/system_call/type_conversions",
         "//asylo/test/util:test_flags",
         "//asylo/test/util:test_main",
         "//asylo/util:status_macros",
