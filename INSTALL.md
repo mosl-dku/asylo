@@ -14,8 +14,8 @@ recommended way of using the Asylo framework.
 Clone the Asylo project from GitHub into a directory of your choice.
 
 ```bash
-ASYLO="${HOME}"/asylo
-git clone https://github.com/google/asylo.git "${ASYLO}"/sdk
+ASYLO="${PWD}"/asylo
+git clone https://github.com/yeoseunghyun/asylo.git "${ASYLO}"/sdk
 ```
 
 ## Toolchain

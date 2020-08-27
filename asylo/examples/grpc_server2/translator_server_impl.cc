@@ -16,7 +16,7 @@
  *
  */
 
-#include "asylo/examples/grpc_server/translator_server_impl.h"
+#include "asylo/examples/grpc_server2/translator_server_impl.h"
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
@@ -57,7 +57,10 @@ TranslatorServerImpl::TranslatorServerImpl()
 
 double x[2][5]={{1,0,3,0,5},{0,2,0,4,0}};
 double y[1][5] = {1,2,3,4,5};
+
 double **matrix_result, **transposed_x;
+int count =0;
+
 
 double **w;
 double *b;
@@ -115,7 +118,9 @@ double **TranslatorServerImpl::getMat(std::string size, std::vector<double> inpu
 	for (int row = 0; row < count_rows; row++){
 		for (int column = 0; column < count_columns; column++){
 			ary[row][column] = input[count_columns * row + column];
+			std::cout<<ary[row][column]<<" ";
 		}
+		std::cout<<"\n";
 	}
 
 	return ary;
@@ -217,36 +222,32 @@ void TranslatorServerImpl::matsub(double **input_mat1, double vec[1][5], int mat
 
 void TranslatorServerImpl::getOutput()
 {
-	/*output = "";
-
-	for (int i = 0; i < row_mat1; i++){
-		output += "[";
-		for (int j = 0; j < col_mat2 - 1; j++){
-			output += std::to_string(matrix_result[i][j]) + " ";
-		}
-		output += std::to_string(matrix_result[i][col_mat2 - 1]);
-		output += "]";
-	}*/
 }
 
-void TranslatorServerImpl::setOutput(GetMatmulResponse *response, int output_row, int output_col)
+void TranslatorServerImpl::setOutput(GetGradWResponse *response, int output_row, int output_col)
 {
+	std::cout<<"must be 1"<<std::endl;
 	for (int i = 0; i < output_row; i++){
 		for (int j = 0; j < output_col; j++)
+		{
+			matrix_result[i][j] = matrix_result[i][j];
 			response->add_result(matrix_result[i][j]); //add each result to response var
+		}
 	}
 }
 
 void TranslatorServerImpl::deleteMemory()
 {
+
 }
 
-::grpc::Status TranslatorServerImpl::MatMul(
-	::grpc::ServerContext *context, const GetMatMulRequest *request,
-	GetMatmulResponse *response)
+::grpc::Status TranslatorServerImpl::GetGrad_W(
+	::grpc::ServerContext *context, const GetGradWRequest *request,
+	GetGradWResponse *response)
 {
 	context->set_compression_algorithm(GRPC_COMPRESS_GZIP);
-
+	++count;
+	std::cout<<"-----------------------------"<<count<<" called-------------------------------------"<<std::endl;
 	std::string w_size_str = request->tensor1_shape();
 	std::string b_size_str = request->tensor2_shape();
 	std::string x_size_str = "[2,5]";
@@ -256,48 +257,36 @@ void TranslatorServerImpl::deleteMemory()
 	std::vector<double> b_input;
 	std::vector<double> y_input;
 	std::cout<<w_size_str<<b_size_str<<std::endl;
-	if(w_size_str=="[1,5]")
-	{
-		getDim(w_size_str, w_row, w_col);
-		getDim(x_size_str, x_row, x_col);
-		for (int i = 0; i < w_row * w_col; i++)
-			w_input.push_back(request->tensor1(i));
-		w = getMat(w_size_str, w_input, w_row, w_col);
-		transposed_x = transpose(x,2,5);
-		matrix_result = matmul(w,transposed_x,1,2,5);
-		setOutput(response,1,2);
-		return ::grpc::Status::OK;
-	}
-	if(b_size_str=="[1,5]")
-	{
-		double grad_b_out = 0;
-		for (int i = 0; i < w_row * w_col; i++)
-			grad_b_out += request->tensor1(i);
-		response->add_result(grad_b_out);
-		return ::grpc::Status::OK;
-	}
 
 	getDim(w_size_str, w_row, w_col);
 	getDim(x_size_str, x_row, x_col);
 	getDim(y_size_str, y_row, y_col);
-
 	getDim(b_size_str, b_size);
 
-	for (int i = 0; i < w_row * w_col; i++)
+	for (int i = 0; i < w_row * w_col; i++){
 		w_input.push_back(request->tensor1(i));
-	for (int i = 0; i < b_size ; i++)
+	}
+	for (int i = 0; i < b_size ; i++){
 		b_input.push_back(request->tensor2(i));
+	}
 	
-		w = getMat(w_size_str, w_input, w_row, w_col);
-		b = getVec(b_input, b_size);
+	w = getMat(w_size_str, w_input, w_row, w_col);
+	//b = getVec(b_input, b_size);
 	
 
-	matrix_result = matmul(w, x,1,5,2);
-	matadd(matrix_result, b, 1, 5);
-	matsub(matrix_result, y, 1, 5);
+	//matrix_result = matmul(w, x,1,5,2);
+	//matadd(matrix_result, b, 1, 5);
+	//matsub(w, y, 1, 5);
+	//for(int i =0; i<5;i++)
+	//std::cout<<matrix_result[0][i];
+	if(transposed_x==NULL)
+	transposed_x = transpose(x,2,5);
+
+	matrix_result = matmul(w,transposed_x,1,2,5);
+	//std::cout<<matrix_result[0][i]<<std::endl;
 
 	if (matrix_result != NULL){
-		setOutput(response,1,5);
+		setOutput(response,1,2);
 	}
 	else{
 		std::cout << "matrix_result is NULL" << std::endl;
@@ -306,6 +295,5 @@ void TranslatorServerImpl::deleteMemory()
 	deleteMemory();
 	return ::grpc::Status::OK;
 }
-
 }  // namespace grpc_server
 }  // namespace examples

@@ -16,7 +16,7 @@
  *
  */
 
-#include "asylo/examples/grpc_server/translator_server_impl.h"
+#include "asylo/examples/grpc_server3/translator_server_impl.h"
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
@@ -54,19 +54,6 @@ TranslatorServerImpl::TranslatorServerImpl()
   response->set_translated_word(response_iterator->second);
   return ::grpc::Status::OK;
 }
-
-double x[2][5]={{1,0,3,0,5},{0,2,0,4,0}};
-double y[1][5] = {1,2,3,4,5};
-double **matrix_result, **transposed_x;
-
-double **w;
-double *b;
-std::string output;
-
-int w_row, w_col;
-int x_row, x_col;
-int y_row, y_col;
-int b_size;
 
 void TranslatorServerImpl::split(const std::string &str, std::vector<std::string> &vect, char ch)
 {
@@ -229,21 +216,27 @@ void TranslatorServerImpl::getOutput()
 	}*/
 }
 
-void TranslatorServerImpl::setOutput(GetMatmulResponse *response, int output_row, int output_col)
-{
-	for (int i = 0; i < output_row; i++){
-		for (int j = 0; j < output_col; j++)
-			response->add_result(matrix_result[i][j]); //add each result to response var
-	}
-}
-
 void TranslatorServerImpl::deleteMemory()
 {
 }
 
-::grpc::Status TranslatorServerImpl::MatMul(
-	::grpc::ServerContext *context, const GetMatMulRequest *request,
-	GetMatmulResponse *response)
+double x[2][5]={{1,0,3,0,5},{0,2,0,4,0}};
+double y[1][5] = {1,2,3,4,5};
+
+double **matrix_result, **transposed_x;
+
+
+double **w;
+double **b;
+std::string output;
+
+int w_row, w_col;
+int x_row, x_col;
+int y_row, y_col;
+int b_row, b_col;
+::grpc::Status TranslatorServerImpl::GetGrad_b(
+	::grpc::ServerContext *context, const GetGradbRequest *request,
+	GetGradbResponse *response)
 {
 	context->set_compression_algorithm(GRPC_COMPRESS_GZIP);
 
@@ -256,56 +249,40 @@ void TranslatorServerImpl::deleteMemory()
 	std::vector<double> b_input;
 	std::vector<double> y_input;
 	std::cout<<w_size_str<<b_size_str<<std::endl;
-	if(w_size_str=="[1,5]")
-	{
-		getDim(w_size_str, w_row, w_col);
-		getDim(x_size_str, x_row, x_col);
-		for (int i = 0; i < w_row * w_col; i++)
-			w_input.push_back(request->tensor1(i));
-		w = getMat(w_size_str, w_input, w_row, w_col);
-		transposed_x = transpose(x,2,5);
-		matrix_result = matmul(w,transposed_x,1,2,5);
-		setOutput(response,1,2);
-		return ::grpc::Status::OK;
-	}
-	if(b_size_str=="[1,5]")
-	{
-		double grad_b_out = 0;
-		for (int i = 0; i < w_row * w_col; i++)
-			grad_b_out += request->tensor1(i);
-		response->add_result(grad_b_out);
-		return ::grpc::Status::OK;
-	}
 
 	getDim(w_size_str, w_row, w_col);
 	getDim(x_size_str, x_row, x_col);
 	getDim(y_size_str, y_row, y_col);
-
-	getDim(b_size_str, b_size);
+	getDim(b_size_str, b_row, b_col);
 
 	for (int i = 0; i < w_row * w_col; i++)
+	{
 		w_input.push_back(request->tensor1(i));
-	for (int i = 0; i < b_size ; i++)
-		b_input.push_back(request->tensor2(i));
-	
-		w = getMat(w_size_str, w_input, w_row, w_col);
-		b = getVec(b_input, b_size);
+	}
+	for (int i = 0; i < b_row * b_col ; i++)
+	{
+			b_input.push_back(request->tensor2(i));
+	}
+	//w = getMat(w_size_str, w_input, w_row, w_col);
+	b = getMat(b_size_str, b_input, b_row, b_col);
 	
 
-	matrix_result = matmul(w, x,1,5,2);
-	matadd(matrix_result, b, 1, 5);
-	matsub(matrix_result, y, 1, 5);
+	//matrix_result = matmul(w, x,1,5,2);
+	//matadd(matrix_result, b, 1, 5);
+	//matsub(matrix_result, y, 1, 5);
 
-	if (matrix_result != NULL){
-		setOutput(response,1,5);
+	double grad_b_out = 0;
+	for(int i =0; i<b_row;i++)
+	{
+		for(int j=0; j<b_col;j++)
+		{
+			grad_b_out += b[i][j];
+		}
+		
 	}
-	else{
-		std::cout << "matrix_result is NULL" << std::endl;
-		output = " ";
-	}
+	response->set_result(2*grad_b_out/5);
 	deleteMemory();
 	return ::grpc::Status::OK;
 }
-
 }  // namespace grpc_server
 }  // namespace examples

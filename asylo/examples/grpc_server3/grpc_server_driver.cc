@@ -23,7 +23,7 @@
 #include "absl/flags/parse.h"
 #include "absl/time/clock.h"
 #include "asylo/enclave_manager.h"
-#include "asylo/examples/grpc_server/grpc_server_util.h"
+#include "asylo/examples/grpc_server3/grpc_server_util.h"
 #include "asylo/util/logging.h"
 #include "asylo/util/status.h"
 #include "asylo/util/statusor.h"
@@ -37,7 +37,7 @@ ABSL_FLAG(int32_t, server_max_lifetime, 16000,
 
 // Default value 0 is used to indicate that the system should choose an
 // available port.
-ABSL_FLAG(int32_t, port, 34567, "Port that the server listens to");
+ABSL_FLAG(int32_t, port, 56789, "Port that the server listens to");
 ABSL_FLAG(bool, debug, true, "Whether to use a debug enclave");
 
 int main(int argc, char *argv[]) {

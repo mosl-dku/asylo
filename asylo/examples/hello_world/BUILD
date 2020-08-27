@@ -51,6 +51,7 @@ cc_unsigned_enclave(
         "//asylo/util:logging",
         "//asylo/util:status",
         "@com_google_absl//absl/strings",
+        "@zlib",
     ],
 )
 
@@ -75,5 +76,6 @@ enclave_loader(
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
         "@com_google_absl//absl/strings",
+        "@zlib",
     ],
 )

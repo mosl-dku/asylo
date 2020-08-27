@@ -31,7 +31,8 @@ message GetTranslationResponse {
 
 //get tensor size as string and value as double array type 
 // A request message containing a word to be translated.
-message GetMatMulRequest {
+
+message GetGradbRequest {
   optional string tensor1_shape = 1;
   repeated double tensor1 = 2;
   optional string tensor2_shape = 3;
@@ -39,8 +40,8 @@ message GetMatMulRequest {
 }
 
 //make matmul response (double array type)
-message GetMatmulResponse {
-  repeated double result = 1;
+message GetGradbResponse {
+  optional double result = 1;
 }
 
 service Translator {
@@ -48,6 +49,6 @@ service Translator {
   rpc GetTranslation(GetTranslationRequest) returns (GetTranslationResponse) {
     // errors: no input word, no translation available
   }
-  rpc MatMul(GetMatMulRequest) returns (GetMatmulResponse) {
+  rpc GetGrad_b(GetGradbRequest) returns (GetGradbResponse) {
   }
 }

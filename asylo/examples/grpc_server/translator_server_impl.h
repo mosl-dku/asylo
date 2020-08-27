@@ -38,12 +38,30 @@ class TranslatorServerImpl final : public Translator::Service {
   explicit TranslatorServerImpl();
 
  private:
+  ::grpc::Status MatMul(::grpc::ServerContext *context,
+                              const GetMatMulRequest *query,
+                              GetMatmulResponse *response) ;
+
   ::grpc::Status GetTranslation(::grpc::ServerContext *context,
                                 const GetTranslationRequest *request,
                                 GetTranslationResponse *response) override;
 
   // A map from words to their translations.
   absl::flat_hash_map<std::string, std::string> translation_map_;
+
+  void split(const std::string &str, std::vector<std::string> &vect, char ch);
+	void getDim(std::string size,int& count_rows, int& count_columns);
+  void getDim(std::string szie, int &vec_size);
+	double** getMat(std::string size, std::vector<double> input, int &count_rows, int &count_columns);
+  double *getVec(std::vector<double> input, int vec_size);
+	double** transpose(double input[2][5], int count_rows, int count_columns);
+	double** matmul(double** input_mat1, double input_mat2[2][5], int output_row, int output_col, int inner);
+	double** matmul(double** input_mat1, double** input_mat2, int output_row, int output_col, int inner);
+  void matadd(double **input_mat1, double *vec, int mat_row, int mat_col);
+  void matsub(double **input_mat1, double vec[1][5], int mat_row, int mat_col);
+	void getOutput();
+ 	void setOutput(GetMatmulResponse *response, int, int);
+	void deleteMemory();
 };
 
 }  // namespace grpc_server
