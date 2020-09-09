@@ -22,8 +22,15 @@
 // Declares the enclave client API, providing types and methods for loading,
 // accessing, and finalizing enclaves.
 
+#define SIGSNAPSHOT	SIGUSR2
+
 #include <string>
 #include <utility>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/time.h>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/memory/memory.h"
@@ -31,12 +38,14 @@
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "absl/types/variant.h"
+#include "absl/strings/str_split.h"
 #include "asylo/enclave.pb.h"  // IWYU pragma: export
 #include "asylo/platform/core/enclave_client.h"
 #include "asylo/platform/core/enclave_config_util.h"
 #include "asylo/platform/core/shared_resource_manager.h"
 #include "asylo/platform/primitives/untrusted_primitives.h"
 #include "asylo/platform/primitives/util/message.h"
+#include "asylo/platform/primitives/sgx/untrusted_sgx.h"
 #include "asylo/util/status.h"  // IWYU pragma: export
 #include "asylo/util/statusor.h"
 
@@ -222,6 +231,16 @@ class EnclaveManager {
   EnclaveLoadConfig GetLoadConfigFromClient(EnclaveClient *client)
       ABSL_LOCKS_EXCLUDED(client_table_lock_);
 
+    // some functions definitions for migration.
+    void ReloadEnclave(asylo::EnclaveManager *, void *, size_t);
+    void ResumeExecution(asylo::EnclaveManager *);
+    void Destroy(asylo::EnclaveManager *);
+    void mig_handler(int);
+    void initiate_enclave(int);
+    asylo::EnclaveConfig GetApplicationConfig();
+    void PrepareMigration(int g_argc, char **);
+    void SetBaseAddressAndClient(asylo::EnclaveManager *);
+    
  private:
   EnclaveManager() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
   EnclaveManager(EnclaveManager const &) = delete;
@@ -269,6 +288,21 @@ class EnclaveManager {
 
   // Singleton instance of this class.
   static EnclaveManager *instance_ ABSL_GUARDED_BY(mu_);
+
+  // new variables for migration.
+    primitives::SgxEnclaveClient *client;
+    void *enc_base;
+    size_t enc_size;
+    int g_argc;
+    char ** g_argv;
+    SnapshotLayout layout;
+    struct sigaction old_sa;
+    struct sigaction new_sa;
+    struct sigaction old_mig_sa;
+    struct sigaction new_mig_sa;
+
+    struct timeval tv;
+    struct timeval tve;
 };
 
 /// An abstract enclave loader.
