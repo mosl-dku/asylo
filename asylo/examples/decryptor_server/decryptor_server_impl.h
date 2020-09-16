@@ -38,12 +38,10 @@ class DecryptorServerImpl final : public Decryptor::Service {
   explicit DecryptorServerImpl();
 
  private:
-  ::grpc::Status GetDecryption(::grpc::ServerContext *context,
+  ::grpc::Status Decrypt(::grpc::ServerContext *context,
                                 const GetDecryptionRequest *request,
                                 GetDecryptionResponse *response) override;
 
-  // A map from words to their translations.
-  absl::flat_hash_map<std::string, std::string> translation_map_;
 };
 
 }  // namespace decryptor_server

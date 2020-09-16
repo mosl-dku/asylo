@@ -18,20 +18,18 @@ syntax = "proto2";
 
 package examples.decryptor_server;
 
-// A request message containing a word to be translated.
+// A request message of ciphertext
 message GetDecryptionRequest {
-  optional string ciphertext = 1;
+  required string ciphertext = 1;
 }
 
-// A response message containing the translation of a GetTranslationRequest's
-// input_word.
+// A response message containing the plaintext
 message GetDecryptionResponse {
-  optional string plaintext = 1;
+  required string plaintext = 1;
 }
 
 service Decryptor {
   // Translates the given word.
-  rpc GetDecryption(GetDecryptionRequest) returns (GetDecryptionResponse) {
-    // errors: no input word, no translation available
+  rpc Decrypt(GetDecryptionRequest) returns (GetDecryptionResponse) {
   }
 }
