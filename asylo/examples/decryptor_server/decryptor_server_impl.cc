@@ -51,8 +51,6 @@ namespace decryptor_server {
 
 
 const char AssociatedDataBuf[] = "";
-const size_t KeySize =32;
-unsigned char cipher[256], plain[256];
 
 std::string ReplaceAll(std::string str, const std::string& from, const std::string& to) {
         size_t start_pos = 0;
@@ -110,10 +108,12 @@ RSA *GetKDK(const char *cert_file)
 	Read encrypted key-decryption-key
 	input: key_file
 		the filename for the encrypted key
+			out_length
+		output param for key length
 	output: keybytes
 	N.B: the caller should free the keybytes
 */
-uint8_t *ReadEncKey(const char *key_file)
+uint8_t *ReadEncKey(const char *key_file, int *out_length)
 {
 	struct stat sbuf;
 	uint8_t *p = NULL;
@@ -133,6 +133,7 @@ uint8_t *ReadEncKey(const char *key_file)
 		return NULL;
 	}
 	LOG(INFO) << "[enc_key]: "<< p;
+	*out_length = nrbytes;
 	return p;
 }
 
@@ -141,24 +142,72 @@ uint8_t *ReadEncKey(const char *key_file)
 		from the encrypted_key (enc_key) and certificate (key-decryption-key)
 	input:  byte[] enc_key
 				encrypted key from file,
+			int enc_key_len
+				key length of enc_key
 			RSA* Kpub
 				key-decryption-key from certificate
 	output: byte[] dek
 				data encryption key
+				the caller should free the dek
 */
-uint8_t *DecryptDEK(uint8_t *enc_key, RSA *Kpub)
+uint8_t *DecryptDEK(uint8_t *enc_key, int klen, RSA *Kpub)
 {
-	uint8_t *kdk = new uint8_t[256];
-	int key_length = 0;
-	key_length = RSA_public_decrypt(sizeof(enc_key), enc_key, kdk, Kpub, RSA_PKCS1_PADDING);
-	std::string input_key((char *)kdk);
+	uint8_t str_key[256];
+	int key_length;
+	int kdk_length = 32;
+	uint8_t *kdk;
+	memset(str_key, 0, 256);
+	key_length = RSA_public_decrypt(klen, enc_key, str_key, Kpub, RSA_PKCS1_PADDING);
+	std::string input_key((char *)str_key);
 
-	if (key_length == 0) {
+	if (key_length <= 0) {
 		LOG(ERROR) << "DecryptDEK failed";
 		return NULL;
 	}
-	LOG(INFO) << "[AES-GCM key]: "<< input_key;
+	LOG(INFO) << "[AES-GCM key]: "<< input_key << "\nkeylen: " << key_length;
+
+	kdk = RetriveKeyFromString(ReplaceAll(input_key, std::string(" "), std::string("")), kdk_length);
 	return kdk;
+}
+
+/*
+	Decrypt And Decompress
+		The plaindata is compressed and then encrypted
+	input: 	std::string cipher_text
+				the ciphertext (original data)
+			uint8_t* key
+				the ciphering key
+*/
+std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
+{
+	int data_len = cipher_text.length();
+	size_t out_len;
+	uint8_t* dout = new uint8_t[data_len];
+	uint8_t nonce[32] = {0,};
+
+	EVP_AEAD_CTX ctx;
+    const EVP_AEAD *const aead = EVP_aead_aes_256_gcm();
+    size_t nonce_len= EVP_AEAD_nonce_length(aead);
+    EVP_AEAD_CTX_init(&ctx, aead, key, EVP_AEAD_key_length(aead),EVP_AEAD_DEFAULT_TAG_LENGTH, NULL);
+    EVP_AEAD_CTX_open(&ctx, dout, &out_len, data_len, nonce, nonce_len, (const uint8_t *)(cipher_text.c_str()), data_len,NULL, 0);
+	if (out_len == 0) {
+		return std::string();
+	}
+    LOG(INFO) << "[DEBUG] Decrypted Data ("<< out_len <<"): "<< dout;
+
+    // decompress
+    unsigned char* pCompressedData = (unsigned char*) dout;
+    unsigned long out_buffer_length = (out_len << 1) + 32;
+    unsigned char * pUncompressedData = new unsigned char [out_buffer_length];
+    if (pCompressedData != nullptr) memset(pUncompressedData,0,out_buffer_length);
+    int nResult = uncompress(pUncompressedData, &out_buffer_length, dout, out_len);
+    if(nResult != Z_OK) {
+		return std::string();
+	}
+    LOG(INFO) << "[DEBUG] Decrypted and Uncompressed Data ("<< out_buffer_length <<"): " << pUncompressedData;
+
+	std::string out((char *)pUncompressedData);
+	return out;
 }
 
 DecryptorServerImpl::DecryptorServerImpl()
@@ -179,40 +228,44 @@ DecryptorServerImpl::DecryptorServerImpl()
 	RSA *pubkey; // key decryption key
 	uint8_t *dek; // data encryption key
 	uint8_t *enc_key;
+	int enc_key_len;
 
-	char certificate_file[] = "/home/yeo/data/public.crt";
-	char encrypted_key[] = "/home/yeo/data/enc_key";
+	char certificate_file[] = "/key_material/public.crt";
+	char encrypted_key[] = "/key_material/enc_key";
 	// Check the enc_key file: encrypted key
 	pubkey = GetKDK(certificate_file);
 	if (pubkey == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid certificate file available");
 	}
-	enc_key = ReadEncKey(encrypted_key);
+	enc_key = ReadEncKey(encrypted_key, &enc_key_len);
 	if (enc_key == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid key file available");
 	}
 
-	dek = DecryptDEK(enc_key, pubkey);
+	dek = DecryptDEK(enc_key, enc_key_len, pubkey);
 	if (dek == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"decryption key derivation failed");
 	}
 
+	// Confirm that |*request| has an |ciphertext| field.
+	if (!request->has_ciphertext()) {
+		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+			"No input word given");
+	}
 
-  // Confirm that |*request| has an |ciphertext| field.
-  if (!request->has_ciphertext()) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
-                          "No input word given");
-  }
 	std::string cipher_text = request->ciphertext();
-	//plaintext = DecryptAndDecompress(cipher_text, dek);
+	std::string plaintext = DecryptAndDecompress(cipher_text, dek);
+	if (plaintext.empty()) {
+		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+                          "Decryption failed");
+	}
 
-
-  // Return the plaintext.
-  response->set_plaintext(request->ciphertext());
-  return ::grpc::Status::OK;
+	// Return the plaintext.
+	response->set_plaintext(plaintext);
+	return ::grpc::Status::OK;
 }
 
 }  // namespace decryptor_server

@@ -20,7 +20,7 @@ package examples.decryptor_server;
 
 // A request message of ciphertext
 message GetDecryptionRequest {
-  required string ciphertext = 1;
+  required bytes ciphertext = 1;
 }
 
 // A response message containing the plaintext
