@@ -197,7 +197,7 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
 
     // decompress
     unsigned char* pCompressedData = (unsigned char*) dout;
-    unsigned long out_buffer_length = (out_len << 1) + 32;
+    unsigned long out_buffer_length = (out_len << 4);
     unsigned char * pUncompressedData = new unsigned char [out_buffer_length];
     if (pCompressedData != nullptr) memset(pUncompressedData,0,out_buffer_length);
     int nResult = uncompress(pUncompressedData, &out_buffer_length, dout, out_len);
