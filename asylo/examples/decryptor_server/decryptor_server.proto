@@ -20,6 +20,7 @@ package examples.decryptor_server;
 
 // A request message of ciphertext
 message GetDecryptionRequest {
+  required string key_filename = 10001;
   required bytes ciphertext = 1;
 }
 

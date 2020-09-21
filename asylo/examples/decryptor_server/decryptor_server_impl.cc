@@ -230,15 +230,28 @@ DecryptorServerImpl::DecryptorServerImpl()
 	uint8_t *enc_key;
 	int enc_key_len;
 
+	// Confirm that |*request| has an |ciphertext| field.
+	if (!request->has_ciphertext()) {
+		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+			"No input ciphertext given");
+	}
+	// Confirm that |*request| has an |ciphertext| field.
+	if (!request->has_key_filename()) {
+		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+			"No input key_filename given");
+	}
+
+
+
 	char certificate_file[] = "/key_material/public.crt";
-	char encrypted_key[] = "/key_material/enc_key";
+	char *encrypted_key_filename = (char *)request->key_filename().c_str();
 	// Check the enc_key file: encrypted key
 	pubkey = GetKDK(certificate_file);
 	if (pubkey == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid certificate file available");
 	}
-	enc_key = ReadEncKey(encrypted_key, &enc_key_len);
+	enc_key = ReadEncKey(encrypted_key_filename, &enc_key_len);
 	if (enc_key == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid key file available");
@@ -248,12 +261,6 @@ DecryptorServerImpl::DecryptorServerImpl()
 	if (dek == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"decryption key derivation failed");
-	}
-
-	// Confirm that |*request| has an |ciphertext| field.
-	if (!request->has_ciphertext()) {
-		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
-			"No input word given");
 	}
 
 	std::string cipher_text = request->ciphertext();
