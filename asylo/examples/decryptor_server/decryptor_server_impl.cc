@@ -79,21 +79,20 @@ uint8_t* RetriveKeyFromString(std::string stf,size_t key_size){
 }
 
 /*
-	Retrive Key decryption Key from certificate file
+	Retrive Key decryption Key from private key file
 */
-RSA *GetKDK(const char *cert_file)
+RSA *GetKDK(const char *private_key_file)
 {
 	struct stat sbuf;
-    BIO *certbio = NULL;
+    BIO *keybio = NULL;
     RSA *output = NULL;
-	int res = stat(cert_file, &sbuf);
+	int res = stat(private_key_file, &sbuf);
 	if (res == 0) {
 		// works only when the cert_file exists
-		certbio = BIO_new(BIO_s_file());
-		BIO_read_filename(certbio, cert_file);
-		output = EVP_PKEY_get0_RSA(
-			X509_get_pubkey(PEM_read_bio_X509(certbio, NULL, 0, NULL)));
-		BIO_free(certbio);
+		keybio = BIO_new(BIO_s_file());
+		BIO_read_filename(keybio, private_key_file);
+		output = PEM_read_bio_RSAPrivateKey(keybio, NULL, NULL, NULL);
+		BIO_free(keybio);
 	}
 
 	if (output == NULL) {
@@ -150,14 +149,14 @@ uint8_t *ReadEncKey(const char *key_file, int *out_length)
 				data encryption key
 				the caller should free the dek
 */
-uint8_t *DecryptDEK(uint8_t *enc_key, int klen, RSA *Kpub)
+uint8_t *DecryptDEK(uint8_t *enc_key, int klen, RSA *Kpriv)
 {
 	uint8_t str_key[256];
 	int key_length;
 	int kdk_length = 32;
 	uint8_t *kdk;
 	memset(str_key, 0, 256);
-	key_length = RSA_public_decrypt(klen, enc_key, str_key, Kpub, RSA_PKCS1_PADDING);
+	key_length = RSA_private_decrypt(klen, enc_key, str_key, Kpriv, RSA_PKCS1_PADDING);
 	std::string input_key((char *)str_key);
 
 	if (key_length <= 0) {
@@ -225,7 +224,7 @@ DecryptorServerImpl::DecryptorServerImpl()
 		4. read the encrypted data (ciphertext in the request)
 		5. decrypt data (4) with the key decryption key (3)
 	*/
-	RSA *pubkey; // key decryption key
+	RSA *privkey; // key decryption key
 	uint8_t *dek; // data encryption key
 	uint8_t *enc_key;
 	int enc_key_len;
@@ -243,11 +242,11 @@ DecryptorServerImpl::DecryptorServerImpl()
 
 
 
-	char certificate_file[] = "/key_material/public.crt";
+	char priv_key_file[] = "/key_material/private.key";
 	char *encrypted_key_filename = (char *)request->key_filename().c_str();
 	// Check the enc_key file: encrypted key
-	pubkey = GetKDK(certificate_file);
-	if (pubkey == NULL) {
+	privkey = GetKDK(priv_key_file);
+	if (privkey == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid certificate file available");
 	}
@@ -257,7 +256,7 @@ DecryptorServerImpl::DecryptorServerImpl()
 								"No valid key file available");
 	}
 
-	dek = DecryptDEK(enc_key, enc_key_len, pubkey);
+	dek = DecryptDEK(enc_key, enc_key_len, privkey);
 	if (dek == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"decryption key derivation failed");
