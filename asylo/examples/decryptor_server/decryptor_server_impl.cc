@@ -193,7 +193,7 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
 	if (out_len == 0) {
 		return std::string();
 	}
-    LOG(INFO) << "[DEBUG] Decrypted Data ("<< out_len <<"): "<< dout;
+    //LOG(INFO) << "[DEBUG] Decrypted Data ("<< out_len <<"): "<< dout;
 
     // decompress
     unsigned char* pCompressedData = (unsigned char*) dout;
@@ -204,7 +204,7 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
     if(nResult != Z_OK) {
 		return std::string();
 	}
-    LOG(INFO) << "[DEBUG] Decrypted and Uncompressed Data ("<< out_buffer_length <<"): " << pUncompressedData;
+    //LOG(INFO) << "[DEBUG] Decrypted and Uncompressed Data ("<< out_buffer_length <<"): " << pUncompressedData;
 
 	std::string out((char *)pUncompressedData);
 	return out;
