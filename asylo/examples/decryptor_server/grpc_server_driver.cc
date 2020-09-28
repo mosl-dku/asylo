@@ -46,6 +46,7 @@ int main(int argc, char *argv[]) {
 
   std::string enclave_path = absl::GetFlag(FLAGS_enclave_path);
   LOG_IF(QFATAL, enclave_path.empty()) << "--enclave_path cannot be empty";
+  int32_t server_max_lifetime = absl::GetFlag(FLAGS_server_max_lifetime);
 
   asylo::Status status =
       asylo::EnclaveManager::Configure(asylo::EnclaveManagerOptions());
@@ -65,7 +66,12 @@ int main(int argc, char *argv[]) {
   std::cout << "Server started on port " << port_result.ValueOrDie()
             << std::endl;
 
-  absl::SleepFor(absl::Seconds(absl::GetFlag(FLAGS_server_max_lifetime)));
+	if (server_max_lifetime == -1) {
+		while(1)
+		absl::SleepFor(absl::Seconds(absl::GetFlag(FLAGS_server_max_lifetime)));
+	} else {
+		absl::SleepFor(absl::Seconds(absl::GetFlag(FLAGS_server_max_lifetime)));
+	}
 
   status = examples::decryptor_server::DestroyGrpcServerEnclave();
   LOG_IF(QFATAL, !status.ok())

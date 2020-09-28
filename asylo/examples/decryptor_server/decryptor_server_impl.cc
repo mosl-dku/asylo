@@ -99,7 +99,7 @@ RSA *GetKDK(const char *private_key_file)
 		LOG(ERROR) << "GetKDK failed";
 		return NULL;
 	}
-	LOG(INFO) << "[GetKDK]: "<< output;
+	//LOG(INFO) << "[GetKDK]: "<< output;
     return output;
 }
 
@@ -131,7 +131,7 @@ uint8_t *ReadEncKey(const char *key_file, int *out_length)
 		LOG(ERROR) << "ReadEncKey failed";
 		return NULL;
 	}
-	LOG(INFO) << "[enc_key]: "<< p;
+	//LOG(INFO) << "[enc_key]: "<< p;
 	*out_length = nrbytes;
 	return p;
 }
@@ -153,8 +153,8 @@ uint8_t *DecryptDEK(uint8_t *enc_key, int klen, RSA *Kpriv)
 {
 	uint8_t str_key[256];
 	int key_length;
-	int kdk_length = 32;
-	uint8_t *kdk;
+	int dek_length = 32;
+	uint8_t *dek;
 	memset(str_key, 0, 256);
 	key_length = RSA_private_decrypt(klen, enc_key, str_key, Kpriv, RSA_PKCS1_PADDING);
 	std::string input_key((char *)str_key);
@@ -163,10 +163,10 @@ uint8_t *DecryptDEK(uint8_t *enc_key, int klen, RSA *Kpriv)
 		LOG(ERROR) << "DecryptDEK failed";
 		return NULL;
 	}
-	LOG(INFO) << "[AES-GCM key]: "<< input_key << "\nkeylen: " << key_length;
+	//LOG(INFO) << "[AES-GCM key]: "<< input_key << "\nkeylen: " << key_length;
 
-	kdk = RetriveKeyFromString(ReplaceAll(input_key, std::string(" "), std::string("")), kdk_length);
-	return kdk;
+	dek = RetriveKeyFromString(ReplaceAll(input_key, std::string(" "), std::string("")), dek_length);
+	return dek;
 }
 
 /*
@@ -190,6 +190,7 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
     EVP_AEAD_CTX_init(&ctx, aead, key, EVP_AEAD_key_length(aead),EVP_AEAD_DEFAULT_TAG_LENGTH, NULL);
     EVP_AEAD_CTX_open(&ctx, dout, &out_len, data_len, nonce, nonce_len, (const uint8_t *)(cipher_text.c_str()), data_len,NULL, 0);
 	if (out_len == 0) {
+		delete dout;
 		return std::string();
 	}
     //LOG(INFO) << "[DEBUG] Decrypted Data ("<< out_len <<"): "<< dout;
@@ -201,11 +202,15 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
     if (pCompressedData != nullptr) memset(pUncompressedData,0,out_buffer_length);
     int nResult = uncompress(pUncompressedData, &out_buffer_length, dout, out_len);
     if(nResult != Z_OK) {
+		delete dout;
+		delete pUncompressedData;
 		return std::string();
 	}
     //LOG(INFO) << "[DEBUG] Decrypted and Uncompressed Data ("<< out_buffer_length <<"): " << pUncompressedData;
 
-	std::string out((char *)pUncompressedData);
+	std::string out((char *)pUncompressedData, out_len);
+	delete dout;
+	delete pUncompressedData;
 	return out;
 }
 
@@ -261,6 +266,7 @@ DecryptorServerImpl::DecryptorServerImpl()
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"decryption key derivation failed");
 	}
+	RSA_free((RSA *)privkey);
 
 	std::string cipher_text = request->ciphertext();
 	std::string plaintext = DecryptAndDecompress(cipher_text, dek);
@@ -271,6 +277,8 @@ DecryptorServerImpl::DecryptorServerImpl()
 
 	// Return the plaintext.
 	response->set_plaintext(plaintext);
+
+	delete enc_key;
 	return ::grpc::Status::OK;
 }
 
