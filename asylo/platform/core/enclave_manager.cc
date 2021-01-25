@@ -435,6 +435,7 @@ primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,
 
 void EnclaveManager::__asylo_sig_mig_suspend(int signo) {
 	std::cout << "sig_mig_suspend" << std::endl;
+	kill(getpid(), SIGTERM);
   auto manager_result = EnclaveManager::Instance();
   if (!manager_result.ok()) {
     return;
@@ -465,6 +466,7 @@ void EnclaveManager::SuspendClients() {
 	}
 
 	// EnterAndTakeSnapshot()
+/*
 		// prepare snapshot layout structure
 		//SnapshotLayout *playout = new SnapshotLayout();
 		asylo::SnapshotLayout layout;
@@ -477,7 +479,7 @@ void EnclaveManager::SuspendClients() {
 		LOG(INFO) << "EnterAndTakeSnapshot Succeed";
 	}
 	snapshot_by_client_.emplace(client, std::move(&layout));
-
+*/
 	} // end for
 }
 

@@ -253,7 +253,17 @@ int ocall_enc_untrusted_register_signal_handler(int klinux_signum,
 //            unistd.h              //
 //////////////////////////////////////
 
-void ocall_enc_untrusted__exit(int rc) { _exit(rc); }
+void ocall_enc_untrusted__exit(int rc) {
+	// we might want to migrate this enclave
+	// if it is, it is safe to migrate the enclave now
+	auto primitive_client = dynamic_cast<asylo::primitives::SgxEnclaveClient *>(
+		asylo::primitives::Client::GetCurrentClient());
+
+	asylo::SnapshotLayout layout;
+	primitive_client->EnterAndTakeSnapshot(&layout);
+
+	_exit(rc);
+}
 
 int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
   auto primitive_client = dynamic_cast<asylo::primitives::SgxEnclaveClient *>(

@@ -286,9 +286,14 @@ int enclave_unlink(const char *pathname) {
 }
 
 void enclave_exit(int rc) {
+	// here, we are safe to initiate migration
   while (true) {
     enc_exit(rc);
   }
+}
+
+void exit(int rc) {
+	enclave_exit(rc);
 }
 
 pid_t enclave_fork() { return ForkEnclave(); }
