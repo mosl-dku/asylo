@@ -42,6 +42,7 @@
 
 namespace asylo {
 class EnclaveLoader;
+class SnapshotLayout;
 
 /// Enclave Manager configuration.
 /// \deprecated EnclaveManager no longer needs to be configured.
@@ -263,12 +264,24 @@ class EnclaveManager {
 
   absl::flat_hash_map<const EnclaveClient *, EnclaveLoadConfig>
       load_config_by_client_ ABSL_GUARDED_BY(client_table_lock_);
-
+	absl::flat_hash_map<const EnclaveClient *, std::unique_ptr<SnapshotLayout>>
+      snapshot_by_client_ ABSL_GUARDED_BY(client_table_lock_);
   // Mutex guarding the static state of this class.
   static absl::Mutex mu_;
 
   // Singleton instance of this class.
   static EnclaveManager *instance_ ABSL_GUARDED_BY(mu_);
+
+private:
+  // Migration operation suspend/resume sig handler from os
+	static void __asylo_sig_mig_suspend(int signo);
+	static void __asylo_sig_mig_resume(int signo);
+	void SuspendClients();
+
+	struct sigaction old_suspend_sa;
+	struct sigaction new_suspend_sa;
+	struct sigaction old_resume_sa;
+	struct sigaction new_resume_sa;
 };
 
 /// An abstract enclave loader.

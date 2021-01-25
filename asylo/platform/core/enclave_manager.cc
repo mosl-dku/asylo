@@ -89,6 +89,17 @@ EnclaveManager::EnclaveManager() {
   if (!rc.ok()) {
     LOG(FATAL) << "Could not register realtime clock resource.";
   }
+
+	// mig-signal handler from OS
+	memset(&old_suspend_sa, 0, sizeof(struct sigaction));
+	memset(&new_suspend_sa, 0, sizeof(struct sigaction));
+	memset(&old_resume_sa, 0, sizeof(struct sigaction));
+	memset(&new_resume_sa, 0, sizeof(struct sigaction));
+	new_suspend_sa.sa_handler = EnclaveManager::__asylo_sig_mig_suspend;
+	new_resume_sa.sa_handler = EnclaveManager::__asylo_sig_mig_resume;
+
+	sigaction(SIGUSR2, &new_suspend_sa, &old_suspend_sa);
+	sigaction(SIGUSR1, &new_resume_sa, &old_resume_sa);
 }
 
 Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
@@ -111,6 +122,9 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
   client_by_name_.erase(name);
   name_by_client_.erase(client);
   load_config_by_client_.erase(client);
+
+	sigaction(SIGUSR2, &old_suspend_sa, &new_suspend_sa);
+	sigaction(SIGUSR1, &old_resume_sa, &new_resume_sa);
 
   return status;
 }
@@ -417,6 +431,58 @@ primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,
       manager->GetClient(enclave_name));
   auto primitive_client = client->GetPrimitiveClient();
   return primitive_client.get();
+}
+
+void EnclaveManager::__asylo_sig_mig_suspend(int signo) {
+	std::cout << "sig_mig_suspend" << std::endl;
+  auto manager_result = EnclaveManager::Instance();
+  if (!manager_result.ok()) {
+    return;
+  }
+  EnclaveManager *manager = manager_result.ValueOrDie();
+	manager->SuspendClients();
+}
+
+void EnclaveManager::SuspendClients() {
+
+	Status s;
+	for (const auto & c : client_by_name_) {
+		// for all clients,
+  auto *client = dynamic_cast<asylo::GenericEnclaveClient *>(
+      this->GetClient(c.first));
+	// obtain primitive_client
+	std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
+		std::static_pointer_cast< asylo::primitives::SgxEnclaveClient> (
+			client->GetPrimitiveClient());
+
+	// InitiateMigration()
+	s = sgx_client->InitiateMigration();
+
+	if (!s.ok()) {
+		LOG(QFATAL) << "Init Migration Failed ";
+	} else {
+		LOG(INFO) << "Init Migration Succeed";
+	}
+
+	// EnterAndTakeSnapshot()
+		// prepare snapshot layout structure
+		//SnapshotLayout *playout = new SnapshotLayout();
+		asylo::SnapshotLayout layout;
+	s = sgx_client->EnterAndTakeSnapshot(&layout);
+	// EnterAndTransferSecureSnapshotKey(fconfig);
+
+	if (!s.ok()) {
+		LOG(QFATAL) << "EnterAndTakeSnapshot Failed " << s;
+	} else {
+		LOG(INFO) << "EnterAndTakeSnapshot Succeed";
+	}
+	snapshot_by_client_.emplace(client, std::move(&layout));
+
+	} // end for
+}
+
+void EnclaveManager::__asylo_sig_mig_resume(int signo) {
+	std::cout << "sig_mig_resume" << std::endl;
 }
 
 };  // namespace asylo
