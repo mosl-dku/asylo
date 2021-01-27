@@ -255,12 +255,18 @@ int ocall_enc_untrusted_register_signal_handler(int klinux_signum,
 
 void ocall_enc_untrusted__exit(int rc) {
 	// we might want to migrate this enclave
-	// if it is, it is safe to migrate the enclave now
-	auto primitive_client = dynamic_cast<asylo::primitives::SgxEnclaveClient *>(
+	// if it is, now is safe time to take the snapshot of the enclave
+	auto sgx_client = dynamic_cast<asylo::primitives::SgxEnclaveClient *>(
 		asylo::primitives::Client::GetCurrentClient());
 
-	asylo::SnapshotLayout layout;
-	primitive_client->EnterAndTakeSnapshot(&layout);
+	LOG(INFO) << "Time to take snapshot";
+  asylo::Status status =
+      sgx_client->EnterAndTakeSnapshot();
+  if (!status.ok()) {
+    LOG(ERROR) << "EnterAndTakeSnapshot failed: " << status;
+    errno = ENOMEM;
+    return ;
+  }
 
 	_exit(rc);
 }
@@ -271,6 +277,7 @@ int ocall_enc_untrusted_initiate_migration(const char *enclave_name) {
   if (!primitive_client) {
     return -1;
   }
+	LOG(INFO) << "ocall_enc_untrusted_initiate_migration" << enclave_name << " ";
 
   // A snapshot should be taken and restored for fork, take a snapshot of the
   // current enclave memory.

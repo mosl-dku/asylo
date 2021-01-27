@@ -93,6 +93,7 @@ class SgxEnclaveClient : public Client {
   void GetLaunchToken(sgx_launch_token_t *token) const;
 
   // Enters the enclave and invokes the snapshotting entry-point.
+  Status EnterAndTakeSnapshot();
   Status EnterAndTakeSnapshot(SnapshotLayout *snapshot_layout);
 
   // Enters the enclave and invokes the restoring entry-point.
@@ -102,6 +103,7 @@ class SgxEnclaveClient : public Client {
       const ForkHandshakeConfig &fork_handshake_config);
 
   Status InitiateMigration();
+  Status InitiateMigration(SnapshotLayout *ptr_snapshot_layout);
 
   int EnterAndHandleSignal(int signum, int sigcode);
 
@@ -135,6 +137,7 @@ class SgxEnclaveClient : public Client {
   void *base_address_;              // Enclave base address.
   size_t size_;                     // Enclave size.
   bool is_destroyed_ = true;        // Whether enclave is destroyed.
+	SnapshotLayout * ptr_snapshot_layout_ = nullptr;
 };
 
 }  // namespace primitives

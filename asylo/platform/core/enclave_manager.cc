@@ -95,6 +95,7 @@ EnclaveManager::EnclaveManager() {
 	memset(&new_suspend_sa, 0, sizeof(struct sigaction));
 	memset(&old_resume_sa, 0, sizeof(struct sigaction));
 	memset(&new_resume_sa, 0, sizeof(struct sigaction));
+
 	new_suspend_sa.sa_handler = EnclaveManager::__asylo_sig_mig_suspend;
 	new_resume_sa.sa_handler = EnclaveManager::__asylo_sig_mig_resume;
 
@@ -457,29 +458,15 @@ void EnclaveManager::SuspendClients() {
 			client->GetPrimitiveClient());
 
 	// InitiateMigration()
-	s = sgx_client->InitiateMigration();
-
+	SnapshotLayout *playout = new SnapshotLayout();
+	s = sgx_client->InitiateMigration(playout);
 	if (!s.ok()) {
 		LOG(QFATAL) << "Init Migration Failed ";
 	} else {
 		LOG(INFO) << "Init Migration Succeed";
 	}
 
-	// EnterAndTakeSnapshot()
-/*
-		// prepare snapshot layout structure
-		//SnapshotLayout *playout = new SnapshotLayout();
-		asylo::SnapshotLayout layout;
-	s = sgx_client->EnterAndTakeSnapshot(&layout);
-	// EnterAndTransferSecureSnapshotKey(fconfig);
-
-	if (!s.ok()) {
-		LOG(QFATAL) << "EnterAndTakeSnapshot Failed " << s;
-	} else {
-		LOG(INFO) << "EnterAndTakeSnapshot Succeed";
-	}
-	snapshot_by_client_.emplace(client, std::move(&layout));
-*/
+	snapshot_by_client_.emplace(client, std::move(playout));
 	} // end for
 }
 

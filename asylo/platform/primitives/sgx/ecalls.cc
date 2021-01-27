@@ -46,7 +46,7 @@
 int ecall_take_snapshot(char **output, uint64_t *output_len) {
   int result = 0;
   size_t tmp_output_len;
-  LOG(INFO) << "ecall_tranfer_secure_snapshot_key";
+  LOG(INFO) << "ecall_take_snapshot";
   try {
     result = asylo::TakeSnapshot(output, &tmp_output_len);
   } catch (...) {

@@ -91,6 +91,7 @@ static Status InitiateMigration(sgx_enclave_id_t eid) {
   int result;
   sgx_status_t sgx_status;
   sgx_status = ecall_initiate_migration(eid, &result);
+	LOG(INFO) << "InitMigration" ;
   if (sgx_status != SGX_SUCCESS) {
 	return Status(sgx_status, "Call to ecall_initiate_migration failed");
   }
@@ -370,6 +371,16 @@ int SgxEnclaveClient::EnterAndHandleSignal(int signum, int sigcode) {
   return 0;
 }
 
+Status SgxEnclaveClient::EnterAndTakeSnapshot() {
+	if (! ptr_snapshot_layout_) {
+		// error
+		LOG(QFATAL) << "snapshot_not allocated";
+    return Status(asylo::error::GoogleError::INTERNAL,
+                  "migrating with null snapshot");
+	}
+	return EnterAndTakeSnapshot(ptr_snapshot_layout_);
+}
+
 Status SgxEnclaveClient::EnterAndTakeSnapshot(SnapshotLayout *snapshot_layout) {
   char *output_buf = nullptr;
   size_t output_len = 0;
@@ -457,6 +468,11 @@ Status SgxEnclaveClient::EnterAndTransferSecureSnapshotKey(
 }
 
 Status SgxEnclaveClient::InitiateMigration() {
+  return asylo::primitives::InitiateMigration(id_);
+}
+
+Status SgxEnclaveClient::InitiateMigration(SnapshotLayout *playout) {
+	ptr_snapshot_layout_ = playout;
   return asylo::primitives::InitiateMigration(id_);
 }
 

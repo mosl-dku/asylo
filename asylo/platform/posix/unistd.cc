@@ -286,7 +286,6 @@ int enclave_unlink(const char *pathname) {
 }
 
 void enclave_exit(int rc) {
-	// here, we are safe to initiate migration
   while (true) {
     enc_exit(rc);
   }

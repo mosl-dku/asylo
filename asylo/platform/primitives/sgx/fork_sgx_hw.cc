@@ -338,6 +338,7 @@ void SaveThreadLayoutForSnapshot() {
 }
 
 void SetForkRequested() { fork_requested = true; }
+
 void SetMigrationRequested() { migration_requested = true; }
 
 
@@ -403,6 +404,8 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
                   "Failed to save snapshot key inside enclave");
   }
 
+	Status status;
+#if 0
   // Block and check for other entries inside the enclave. Currently there
   // should be two entries inside the enclave: snapshot ecall and the run ecall
   // which calls fork. If other TCS are running inside the enclave, they may
@@ -413,6 +416,7 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
   if (!status.ok()) {
     return status;
   }
+#endif
 
   // Copy the data and bss section to reserved sections to avoid modifying
   // the data/bss sections while encrypting and copying them to the
