@@ -27,11 +27,14 @@
 #include "asylo/util/status_macros.h"
 #include "asylo/examples/decryptor_server/grpc_server_config.pb.h"
 
+#include "asylo/identity/enclave_assertion_authority_config.pb.h"
+#include "asylo/identity/enclave_assertion_authority_configs.h"
+
 namespace examples {
 namespace decryptor_server {
 namespace {
 
-constexpr char kServerAddress[] = "localhost";
+constexpr char kServerAddress[] = "172.25.244.5"; //localhost
 constexpr char kEnclaveName[] = "grpc_server";
 
 }  // namespace
@@ -47,6 +50,8 @@ asylo::Status LoadGrpcServerEnclave(const std::string &enclave_path,
   asylo::EnclaveConfig *config = load_config.mutable_config();
   config->SetExtension(server_address, kServerAddress);
   config->SetExtension(port, server_port);
+ 
+  *config->add_enclave_assertion_authority_configs() = asylo::CreateNullAssertionAuthorityConfig();
 
   // The SgxLoadConfig sets up configuration specific to an SGX enclave,
   // including the location of the enclave binary and whether to run in debug

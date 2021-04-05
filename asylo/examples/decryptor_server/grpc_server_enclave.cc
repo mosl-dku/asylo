@@ -25,6 +25,10 @@
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 #include "asylo/trusted_application.h"
+
+#include "asylo/grpc/auth/null_credentials_options.h"
+//#include "asylo/grpc/auth/peer_sgx_age_remote_credentials_options.h"
+
 #include "asylo/util/status.h"
 #include "asylo/util/status_macros.h"
 #include "asylo/examples/decryptor_server/grpc_server_config.pb.h"
@@ -33,6 +37,7 @@
 #include "include/grpcpp/security/server_credentials.h"
 #include "include/grpcpp/server.h"
 #include "include/grpcpp/server_builder.h"
+//#include "asylo/grpc/auth/null_credentials_options.h"
 
 namespace examples {
 namespace decryptor_server {
@@ -96,11 +101,15 @@ asylo::Status GrpcServerEnclave::Initialize(
   std::shared_ptr<::grpc::ServerCredentials> server_credentials =
       ::grpc::InsecureServerCredentials();
 
+  //asylo::EnclaveCredentialsOptions options = asylo::PeerSgxLocalCredentialsOptions().Add(asylo::SelfNullCredentialsOptions()); 
+
   // Add a listening port to the server.
   builder.AddListeningPort(
       absl::StrCat(enclave_config.GetExtension(server_address), ":",
                    enclave_config.GetExtension(port)),
       server_credentials, &selected_port_);
+
+//  asylo::EnclaveCredentialsOptions options = asylo::BidirectionalNullCredentialsOptions();
 
   // Instantiate the decryptor service.
   service_ = absl::make_unique<DecryptorServerImpl>();

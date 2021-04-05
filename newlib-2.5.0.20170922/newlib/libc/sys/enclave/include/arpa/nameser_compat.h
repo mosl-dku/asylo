@@ -1,0 +1,4 @@
+#ifndef _ARPA_NAMESER_COMPAT_H_
+#define _ARPA_NAMESER_COMPAT_H_
+
+#endif  // _ARPA_NAMESER_COMPAT_H_

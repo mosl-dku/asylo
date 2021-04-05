@@ -27,6 +27,10 @@
 #include "asylo/util/status.h"
 #include "asylo/util/statusor.h"
 #include "asylo/examples/decryptor_server/grpc_server_util.h"
+//#include "asylo/util/remote/provision.h"
+//#include "asylo/util/remote/remote_loader.pb.h"
+//#include "asylo/util/remote/remote_proxy_config.h"
+//#include "asylo/platform/primitives/sgx/loader.pb.h"
 
 ABSL_FLAG(std::string, enclave_path, "", "Path to enclave to load");
 
@@ -39,6 +43,10 @@ ABSL_FLAG(int32_t, server_max_lifetime, 300,
 // available port.
 ABSL_FLAG(int32_t, port, 0, "Port that the server listens to");
 ABSL_FLAG(bool, debug, true, "Whether to use a debug enclave");
+
+//using ::asylo::RemoteProvision;
+//using ::asylo::RemoteProxyClientConfig;
+//using ::asylo::Status;
 
 int main(int argc, char *argv[]) {
   // Parse command-line arguments.

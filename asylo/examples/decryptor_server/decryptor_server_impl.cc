@@ -99,7 +99,7 @@ RSA *GetKDK(const char *private_key_file)
 		LOG(ERROR) << "GetKDK failed";
 		return NULL;
 	}
-	//LOG(INFO) << "[GetKDK]: "<< output;
+	LOG(INFO) << "[GetKDK]: "<< output;
     return output;
 }
 
@@ -131,7 +131,7 @@ uint8_t *ReadEncKey(const char *key_file, int *out_length)
 		LOG(ERROR) << "ReadEncKey failed";
 		return NULL;
 	}
-	//LOG(INFO) << "[enc_key]: "<< p;
+	LOG(INFO) << "[enc_key]: "<< p; //p
 	*out_length = nrbytes;
 	return p;
 }
@@ -163,7 +163,7 @@ uint8_t *DecryptDEK(uint8_t *enc_key, int klen, RSA *Kpriv)
 		LOG(ERROR) << "DecryptDEK failed";
 		return NULL;
 	}
-	//LOG(INFO) << "[AES-GCM key]: "<< input_key << "\nkeylen: " << key_length;
+	LOG(INFO) << "[AES-GCM key]: "<< input_key << "\nkeylen: " << key_length;
 
 	dek = RetriveKeyFromString(ReplaceAll(input_key, std::string(" "), std::string("")), dek_length);
 	return dek;
@@ -193,7 +193,7 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
 		delete dout;
 		return std::string();
 	}
-    //LOG(INFO) << "[DEBUG] Decrypted Data ("<< out_len <<"): "<< dout;
+    LOG(INFO) << "[DEBUG] Decrypted Data ("<< out_len <<"): "<< dout;
 
     // decompress
     unsigned char* pCompressedData = (unsigned char*) dout;
@@ -208,9 +208,11 @@ std::string DecryptAndDecompress(std::string &cipher_text, uint8_t *key)
 	}
     //LOG(INFO) << "[DEBUG] Decrypted and Uncompressed Data ("<< out_buffer_length <<"): " << pUncompressedData;
 
-	std::string out((char *)pUncompressedData, out_len);
+	//std::string out((char *)pUncompressedData, out_len);
+	std::string out((char *)pUncompressedData);
 	delete dout;
 	delete pUncompressedData;
+	//LOG(INFO) << "[DEBUG] Decrypted and Uncompressed Data (" << out;
 	return out;
 }
 
@@ -255,7 +257,10 @@ DecryptorServerImpl::DecryptorServerImpl()
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid certificate file available");
 	}
+
+	LOG(INFO) << "[DEBUG] encrypted key filename  ("<< encrypted_key_filename <<"): ";
 	enc_key = ReadEncKey(encrypted_key_filename, &enc_key_len);
+	
 	if (enc_key == NULL) {
 		return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
 								"No valid key file available");
