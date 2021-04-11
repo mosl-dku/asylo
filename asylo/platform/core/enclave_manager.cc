@@ -90,6 +90,9 @@ EnclaveManager::EnclaveManager() {
     LOG(FATAL) << "Could not register realtime clock resource.";
   }
 
+	struct sigaction new_suspend_sa;
+	struct sigaction new_resume_sa;
+
 	// mig-signal handler from OS
 	memset(&old_suspend_sa, 0, sizeof(struct sigaction));
 	memset(&new_suspend_sa, 0, sizeof(struct sigaction));
@@ -124,8 +127,11 @@ Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
   name_by_client_.erase(client);
   load_config_by_client_.erase(client);
 
-	sigaction(SIGUSR2, &old_suspend_sa, &new_suspend_sa);
-	sigaction(SIGUSR1, &old_resume_sa, &new_resume_sa);
+	struct sigaction tmp1;
+	struct sigaction tmp2;
+	struct sigaction tmp;
+	sigaction(SIGUSR2, &old_suspend_sa, &tmp1);
+	sigaction(SIGUSR1, &old_resume_sa, &tmp2);
 
   return status;
 }
@@ -142,6 +148,7 @@ Status EnclaveManager::cleanup(EnclaveClient *client) {
   client_by_name_.erase(name);
   name_by_client_.erase(client);
   load_config_by_client_.erase(client);
+  snapshot_by_client_.erase(client);
 
   return Status::OkStatus();
 }
@@ -373,9 +380,29 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
       client_by_name_.erase(name);
       name_by_client_.erase(client);
       load_config_by_client_.erase(client);
+			snapshot_by_client_.erase(client);
     }
   }
   return status;
+}
+
+Status EnclaveManager::ReloadEnclave(absl::string_view name,
+																			EnclaveClient * client,
+																			EnclaveLoadConfig config) {
+	LOG(INFO) << "Reload Enclave, " << name;
+	Status s;
+  {
+		absl::WriterMutexLock lock(&client_table_lock_);
+		client_by_name_.erase(name);
+		name_by_client_.erase(client);
+		load_config_by_client_.erase(client);
+		snapshot_by_client_.erase(client);
+  }
+
+	s = LoadEnclave(config);
+	LOG(INFO) << "Reload: " << s;
+
+	return s;
 }
 
 void EnclaveManager::RemoveEnclaveReference(absl::string_view name) {
@@ -385,6 +412,163 @@ void EnclaveManager::RemoveEnclaveReference(absl::string_view name) {
     client_by_name_.erase(name);
     name_by_client_.erase(client);
   }
+}
+
+void EnclaveManager::__asylo_sig_mig_suspend(int signo) {
+	std::cout << "===  sig_mig_suspend  ===" << std::endl;
+  auto manager_result = EnclaveManager::Instance();
+  if (!manager_result.ok()) {
+		LOG(INFO) << "cannot find EnclaveManager";
+    return;
+  }
+  EnclaveManager *manager = manager_result.ValueOrDie();
+	manager->TakeSnapshot();
+}
+
+void EnclaveManager::TakeSnapshot() {
+	Status s;
+	for (const auto & c : client_by_name_) {
+		// for all clients,
+  auto *client = reinterpret_cast<asylo::GenericEnclaveClient *>(
+      this->GetClient(c.first));
+	// obtain primitive_client
+	std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
+			std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
+				client->GetPrimitiveClient());
+	//asylo::primitives::SgxEnclaveClient* sgx_client =
+	//	(asylo::primitives::SgxEnclaveClient *)(
+	//		(std::dynamic_pointer_cast<asylo::primitives::SgxEnclaveClient>(client->GetPrimitiveClient()))->get());
+
+	// InitiateMigration()
+	SnapshotLayout * snapshot_layout = new SnapshotLayout();
+	s = sgx_client->InitiateMigration();
+	if (!s.ok()) {
+		LOG(QFATAL) << "Init Migration Failed " << s;
+	} else {
+		LOG(INFO) << "InitMigration " << s;
+	}
+	snapshot_by_client_.emplace(client, snapshot_layout);
+	LOG(INFO) << "employ snapshot (" << snapshot_layout << ") " ;
+
+	// TakeSnapshot()
+	s = sgx_client->EnterAndTakeSnapshot(snapshot_layout);
+	if (!s.ok()) {
+		LOG(QFATAL) << "Take snapshot Failed " << s;
+	} else {
+		asylo::EnclaveFinal final_input;
+		LOG(INFO) << "Take snapshot Succeed - now we got the snapshot";
+		// TO-DO: under migration, we may need to destroy the enclave
+		//cleanup(client);
+	}
+	asylo::ForkHandshakeConfig fconfig;
+	fconfig.set_is_parent(true);
+	fconfig.set_socket(0);
+	s = sgx_client->EnterAndTransferSecureSnapshotKey(fconfig);
+	if (!s.ok()) {
+		LOG(QFATAL) << "@source TransferSecureSnapshotKey failed: " << s;
+	} else {
+		LOG(INFO) << "@source TansferSecureSnapshotKey " << s;
+	}
+
+	} // end for
+
+}
+
+void EnclaveManager::SuspendClients() {
+	Status s;
+	for (const auto & c : client_by_name_) {
+		// for all clients,
+  auto *client = dynamic_cast<asylo::GenericEnclaveClient *>(
+      this->GetClient(c.first));
+	// obtain primitive_client
+	std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
+		std::static_pointer_cast< asylo::primitives::SgxEnclaveClient> (
+			client->GetPrimitiveClient());
+
+	// InitiateMigration()
+	SnapshotLayout *playout = new SnapshotLayout();
+	s = sgx_client->InitiateMigration(playout);
+	if (!s.ok()) {
+		LOG(QFATAL) << "Init Migration Failed ";
+	} else {
+		LOG(INFO) << "Init Migration Succeed  - now enclave suspend";
+	}
+
+	snapshot_by_client_.emplace(client, playout);
+	} // end for
+}
+
+void EnclaveManager::__asylo_sig_mig_resume(int signo) {
+	std::cout << "===  sig_mig_resume  ===" << std::endl;
+  auto manager_result = EnclaveManager::Instance();
+  if (!manager_result.ok()) {
+		LOG(INFO) << "cannot find EnclaveManager";
+    return;
+  }
+  EnclaveManager *manager = manager_result.ValueOrDie();
+	manager->ReloadEnclaves();
+}
+
+void EnclaveManager::ReloadEnclaves() {
+	// After the migration,
+	// 1. check aesmd is ready
+	// 2. reload the enclave
+	// 3. restore and resume the enclave
+
+	Status s;
+	// check the aesmd status
+	FILE *fp_aesmd = NULL;
+	char buff_aesmd[2];
+	while (1) {
+		fp_aesmd = popen("/usr/script/aesmd_check.sh", "r");
+		if (fp_aesmd == NULL) {
+			LOG(FATAL) << "popen failed";
+			break;
+		}
+		fgets(buff_aesmd, 2, fp_aesmd);
+		fclose(fp_aesmd);
+
+		if (strcmp(buff_aesmd, "1"))
+			LOG(INFO) << "waiting for aesmd restart...";
+		else {
+			LOG(INFO) << "aesmd is restarted & ready";
+			break;
+		}
+	}
+	usleep (70000);
+
+	// Reload enclaves
+	for (const auto & c : client_by_name_) {
+		// for all clients;
+		auto * client  = reinterpret_cast<asylo::GenericEnclaveClient *>(
+			this->GetClient(c.first));
+
+		auto config = load_config_by_client_.find(client);
+		//ReloadEnclave(c.first, client, config->second);
+
+		std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
+			std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
+				client->GetPrimitiveClient());
+
+		auto result = snapshot_by_client_.find(client);
+		SnapshotLayout *playout = result->second;
+		asylo::ForkHandshakeConfig fconfig;
+		fconfig.set_is_parent(false);
+		fconfig.set_socket(0);
+		s = sgx_client->EnterAndTransferSecureSnapshotKey(fconfig);
+		if (!s.ok()) {
+			LOG(QFATAL) << "@target TransferSecureSnapshotKey failed: " << s;
+		} else {
+			LOG(INFO) << "@target TransferSecureSnapshotKey ( " << playout << " ) " << s;
+		}
+
+		s = sgx_client->EnterAndRestore(*playout);
+		if (!s.ok()) {
+			LOG(QFATAL) << "Restore Enclave failed: " << s;
+		} else {
+			LOG(INFO) << "Restore Enclave " << s;
+		}
+	}
 }
 
 primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,
@@ -434,44 +618,5 @@ primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,
   return primitive_client.get();
 }
 
-void EnclaveManager::__asylo_sig_mig_suspend(int signo) {
-	std::cout << "sig_mig_suspend" << std::endl;
-	kill(getpid(), SIGTERM);
-  auto manager_result = EnclaveManager::Instance();
-  if (!manager_result.ok()) {
-    return;
-  }
-  EnclaveManager *manager = manager_result.ValueOrDie();
-	manager->SuspendClients();
-}
-
-void EnclaveManager::SuspendClients() {
-
-	Status s;
-	for (const auto & c : client_by_name_) {
-		// for all clients,
-  auto *client = dynamic_cast<asylo::GenericEnclaveClient *>(
-      this->GetClient(c.first));
-	// obtain primitive_client
-	std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
-		std::static_pointer_cast< asylo::primitives::SgxEnclaveClient> (
-			client->GetPrimitiveClient());
-
-	// InitiateMigration()
-	SnapshotLayout *playout = new SnapshotLayout();
-	s = sgx_client->InitiateMigration(playout);
-	if (!s.ok()) {
-		LOG(QFATAL) << "Init Migration Failed ";
-	} else {
-		LOG(INFO) << "Init Migration Succeed";
-	}
-
-	snapshot_by_client_.emplace(client, std::move(playout));
-	} // end for
-}
-
-void EnclaveManager::__asylo_sig_mig_resume(int signo) {
-	std::cout << "sig_mig_resume" << std::endl;
-}
 
 };  // namespace asylo

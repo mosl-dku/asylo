@@ -52,6 +52,7 @@ cc_library(
         "//asylo/platform/primitives:enclave_loader",
         "//asylo/platform/primitives:untrusted_primitives",
         "//asylo/platform/primitives/sgx:loader_cc_proto",
+        "//asylo/platform/primitives/sgx:fork_cc_proto",
         "//asylo/platform/primitives/sgx:untrusted_sgx",
         "//asylo/platform/primitives/util:message_reader_writer",
         "//asylo/util:logging",

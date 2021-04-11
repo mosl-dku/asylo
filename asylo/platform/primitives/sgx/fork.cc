@@ -45,8 +45,10 @@ Status VerifyOutputArguments(char **output, size_t *output_len) {
 }  // namespace
 
 int TakeSnapshot(char **output, size_t *output_len) {
+	LOG(INFO) << "TakeSnapshot" ;
   Status status = VerifyOutputArguments(output, output_len);
   if (!status.ok()) {
+		LOG(INFO) << status ;
     return 1;
   }
   EnclaveOutput enclave_output;
@@ -60,6 +62,7 @@ int TakeSnapshot(char **output, size_t *output_len) {
       asylo::GetEnclaveConfig();
 
   if (!config_result.ok()) {
+		LOG(INFO) << "config_result.ok - " << config_result.status() ;
     return status_serializer.Serialize(config_result.status());
   }
 
@@ -71,6 +74,7 @@ int TakeSnapshot(char **output, size_t *output_len) {
   }
 
   SnapshotLayout snapshot_layout;
+	LOG(INFO) << "TakeSnapshotForFork" ;
   status = TakeSnapshotForFork(&snapshot_layout);
   *enclave_output.MutableExtension(snapshot) = snapshot_layout;
   return status_serializer.Serialize(status);

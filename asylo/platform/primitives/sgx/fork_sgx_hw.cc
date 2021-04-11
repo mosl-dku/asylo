@@ -404,8 +404,7 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
                   "Failed to save snapshot key inside enclave");
   }
 
-	Status status;
-#if 0
+#if 1
   // Block and check for other entries inside the enclave. Currently there
   // should be two entries inside the enclave: snapshot ecall and the run ecall
   // which calls fork. If other TCS are running inside the enclave, they may

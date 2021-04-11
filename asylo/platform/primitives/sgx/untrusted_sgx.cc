@@ -88,26 +88,31 @@ static Status TransferSecureSnapshotKey(sgx_enclave_id_t eid, const char *input,
 }
 
 static Status InitiateMigration(sgx_enclave_id_t eid) {
-  int result;
+	int result = 0;
+	Status s;
   sgx_status_t sgx_status;
-  sgx_status = ecall_initiate_migration(eid, &result);
 	LOG(INFO) << "InitMigration" ;
-  if (sgx_status != SGX_SUCCESS) {
-	return Status(sgx_status, "Call to ecall_initiate_migration failed");
-  }
-  return Status::OkStatus();
+  sgx_status = ecall_initiate_migration(eid, &result);
+	if (sgx_status != SGX_SUCCESS) {
+		result = -1;
+		s = Status(sgx_status, "InitiateMigration failed");
+	} else {
+		s = Status::OkStatus();
+	}
+
+  return s;
 }
 
 // Enters the enclave and invokes the snapshotting entry-point. If the ecall
 // fails, return a non-OK status.
 static Status TakeSnapshot(sgx_enclave_id_t eid, char **output,
                            size_t *output_len) {
-  uint64_t bridge_output_len;
+  uint64_t bridge_output_len = 0;
   int retval = 0;
   sgx_status_t sgx_status =
-      ecall_take_snapshot(eid, &retval, output, &bridge_output_len);
+		ecall_take_snapshot(eid, &retval, output, &bridge_output_len);
 
-  if (output_len) {
+	if ((bridge_output_len > 0) && (output_len)) {
     *output_len = static_cast<size_t>(bridge_output_len);
   }
   if (sgx_status != SGX_SUCCESS) {
@@ -384,7 +389,9 @@ Status SgxEnclaveClient::EnterAndTakeSnapshot() {
 Status SgxEnclaveClient::EnterAndTakeSnapshot(SnapshotLayout *snapshot_layout) {
   char *output_buf = nullptr;
   size_t output_len = 0;
+  Status status;
 
+	LOG(INFO) << "EnterAndTakeSnapshot -> TakeSnapshot (untrusted)";
   ScopedCurrentClient scoped_client(this);
   ASYLO_RETURN_IF_ERROR(TakeSnapshot(id_, &output_buf, &output_len));
 
@@ -392,7 +399,6 @@ Status SgxEnclaveClient::EnterAndTakeSnapshot(SnapshotLayout *snapshot_layout) {
   // have a value.
   EnclaveOutput local_output;
   local_output.ParseFromArray(output_buf, output_len);
-  Status status;
   status.RestoreFrom(local_output.status());
 
   // If |output| is not null, then |output_buf| points to a memory buffer

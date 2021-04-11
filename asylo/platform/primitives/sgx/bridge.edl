@@ -71,8 +71,8 @@ enclave {
         [out] char **output,
         [out] uint64_t *output_len);
         
-        // Invokes a utility ecall that enters the enclave to initiate migration
-        utility_tcs public int ecall_initiate_migration();
+    // Invokes a utility ecall that enters the enclave to initiate migration
+    utility_tcs public int ecall_initiate_migration();
 
   };
 
