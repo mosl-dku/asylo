@@ -29,6 +29,9 @@
 #include "asylo/util/logging.h"
 #include "hello_world/hello.pb.h"
 
+#include "asylo/platform/primitives/sgx/untrusted_sgx.h"
+#include "asylo/platform/core/generic_enclave_client.h"
+
 ABSL_FLAG(std::string, enclave_path, "", "Path to enclave to load");
 ABSL_FLAG(std::string, names, "",
           "A comma-separated list of names to pass to the enclave");
@@ -53,9 +56,14 @@ int main(int argc, char *argv[]) {
   asylo::EnclaveManager *manager = manager_result.ValueOrDie();
   std::cout << "Loading " << absl::GetFlag(FLAGS_enclave_path) << std::endl;
 
+	// should set enable_fork
+	asylo::EnclaveConfig config;
+	config.set_enable_fork(true);
+
   // Create an EnclaveLoadConfig object.
   asylo::EnclaveLoadConfig load_config;
   load_config.set_name("hello_enclave");
+	*load_config.mutable_config() = config;
 
   // Create an SgxLoadConfig object.
   asylo::SgxLoadConfig sgx_config;
@@ -95,6 +103,7 @@ int main(int argc, char *argv[]) {
               << output.GetExtension(hello_world::enclave_output_hello)
                      .greeting_message()
               << std::endl;
+		sleep(3);
   }
 
   // Part 3: Finalization
