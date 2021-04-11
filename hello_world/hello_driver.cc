@@ -99,6 +99,8 @@ int main(int argc, char *argv[]) {
       LOG(QFATAL) << "Enclave did not assign an ID for " << name;
     }
 
+		LOG(INFO) << "Trusted application pid: " << getpid();
+
     std::cout << "Message from enclave: "
               << output.GetExtension(hello_world::enclave_output_hello)
                      .greeting_message()
