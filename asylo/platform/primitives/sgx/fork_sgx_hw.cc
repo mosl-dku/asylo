@@ -123,6 +123,7 @@ void DeleteSnapshotKey() {
   global_snapshot_key = nullptr;
 }
 
+// Install Snapshot Key
 bool SetSnapshotKey(const CleansingVector<uint8_t> &key) {
   if (key.size() != kSnapshotKeySize) {
     return false;
@@ -391,6 +392,8 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
                   "Reserved bss section can not hold the enclave bss section");
   }
 
+
+  // Make snapshot Key here!!!
   // Generate an AES256-GCM-SIV snapshot key.
   CleansingVector<uint8_t> snapshot_key(kSnapshotKeySize);
   if (!RAND_bytes(snapshot_key.data(), kSnapshotKeySize)) {
@@ -398,6 +401,7 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
                   absl::StrCat("Can not generate the snapshot key: ",
                                BsslLastErrorString()));
   }
+  // Install Snapshot Key here!!!
   if (!SetSnapshotKey(snapshot_key)) {
     return Status(error::GoogleError::INTERNAL,
                   "Failed to save snapshot key inside enclave");
@@ -850,6 +854,7 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
                   "Failed to serialize EncryptedSnapshotKey");
   }
 
+  // encrypt and save snapshot key
   // Sends the serialized encrypted snapshot key to the child.
   int flag = O_CREAT | O_WRONLY;
   int mode S_IRWXU;
@@ -900,6 +905,7 @@ Status ReceiveSnapshotKey(std::unique_ptr<AeadCryptor> cryptor, int socket) {
       absl::MakeSpan(snapshot_key), &snapshot_key_size));
   snapshot_key.resize(snapshot_key_size);
 
+  // Install Snapshot Key
   // Save the snapshot key inside the enclave for decrypting and restoring the
   // enclave.
   if (!SetSnapshotKey(snapshot_key)) {
