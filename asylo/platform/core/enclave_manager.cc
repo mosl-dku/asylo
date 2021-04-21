@@ -323,8 +323,27 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
     if (sgx_config.has_fork_config()) {
       SgxLoadConfig::ForkConfig fork_config = sgx_config.fork_config();
       base_address = reinterpret_cast<void *>(fork_config.base_address());
-    }
-  }
+    } else {
+			LOG(INFO) << "sgx_load_config has no fork_config" ;
+			LOG(INFO) << "sgx_load_config.base_address " << base_address;
+		}
+  } else {
+		LOG(INFO) << "load_config has no sgx_load_config";
+	}
+	EnclaveConfig config_ = load_config.config();
+	if (config_.enable_fork()) {
+		LOG(INFO) << "fork_enabled" ;
+		SgxLoadConfig sgx_config = load_config.GetExtension(sgx_load_config);
+		if (sgx_config.has_fork_config()) {
+      SgxLoadConfig::ForkConfig fork_config = sgx_config.fork_config();
+      base_address = reinterpret_cast<void *>(fork_config.base_address());
+    } else {
+			LOG(INFO) << "sgx_load_config has no fork_config" ;
+			LOG(INFO) << "sgx_load_config.base_address " << base_address;
+		}
+	} else {
+		LOG(INFO) << "fork_disabled" ;
+	}
 
   std::string name = load_config.name();
   if (config.enable_fork() && base_address) {
@@ -346,13 +365,18 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
   std::shared_ptr<primitives::Client> primitive_client;
   ASYLO_ASSIGN_OR_RETURN(primitive_client,
                          asylo::primitives::LoadEnclave(load_config));
+	LOG(INFO) << "Loading an enclave " << name << " @ " << 
+      dynamic_cast<asylo::primitives::SgxEnclaveClient *>(
+				primitive_client.get())->GetBaseAddress();
 
   StatusOr<std::unique_ptr<EnclaveClient>> result =
       GenericEnclaveClient::Create(name, primitive_client);
   if (!result.ok()) {
     LOG(ERROR) << "LoadEnclave failed: " << result.status();
     return result.status();
-  }
+  } else {
+		LOG(INFO) << "Create EnclaveClient " ;
+	}
 
   // Add the client to the lookup tables.
   EnclaveClient *client = result.ValueOrDie().get();
@@ -370,11 +394,12 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
   // If initialization fails, don't keep the enclave registered. GetClient will
   // return a nullptr rather than an enclave in a bad state.
   if (!status.ok()) {
+		LOG(INFO) << "EnterAndInitialize failed: " << status; 
     Status destroy_status = client->DestroyEnclave();
     if (!destroy_status.ok()) {
       LOG(ERROR) << "DestroyEnclave failed after EnterAndInitialize failure: "
                  << destroy_status;
-    }
+		}
     {
       absl::WriterMutexLock lock(&client_table_lock_);
       client_by_name_.erase(name);
@@ -382,7 +407,9 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
       load_config_by_client_.erase(client);
 			snapshot_by_client_.erase(client);
     }
-  }
+  } else {
+		LOG(INFO) << "EnterAndInitialize succeed" ; 
+	}
   return status;
 }
 
@@ -390,6 +417,18 @@ Status EnclaveManager::ReloadEnclave(absl::string_view name,
 																			EnclaveClient * client,
 																			EnclaveLoadConfig config) {
 	LOG(INFO) << "Reload Enclave, " << name;
+	asylo::GenericEnclaveClient * client_ = (GenericEnclaveClient *)client;
+	std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
+		std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
+			client_->GetPrimitiveClient());
+	void *base_address = sgx_client->GetBaseAddress();
+	size_t enclave_size = sgx_client->GetEnclaveSize();
+
+	LOG(INFO) << "Destroying old enclave" ;
+	sgx_client->DestroyEnclaveMemory(true, base_address, enclave_size);
+	LOG(INFO) << "Release old enclave memory" ;
+	client->ReleaseMemory();
+
 	Status s;
   {
 		absl::WriterMutexLock lock(&client_table_lock_);
@@ -398,6 +437,16 @@ Status EnclaveManager::ReloadEnclave(absl::string_view name,
 		load_config_by_client_.erase(client);
 		snapshot_by_client_.erase(client);
   }
+
+  // Load an enclave at the same virtual space as the parent.
+  config.set_name(name.data(), name.size());
+  SgxLoadConfig sgx_config = config.GetExtension(sgx_load_config);
+  SgxLoadConfig::ForkConfig fork_config;
+  fork_config.set_base_address(
+      reinterpret_cast<uint64_t>(base_address));
+  fork_config.set_enclave_size(enclave_size);
+  *sgx_config.mutable_fork_config() = fork_config;
+  *config.MutableExtension(asylo::sgx_load_config) = sgx_config;
 
 	s = LoadEnclave(config);
 	LOG(INFO) << "Reload: " << s;
@@ -456,7 +505,8 @@ void EnclaveManager::TakeSnapshot() {
 		LOG(QFATAL) << "Take snapshot Failed " << s;
 	} else {
 		asylo::EnclaveFinal final_input;
-		LOG(INFO) << "Take snapshot Succeed - now we got the snapshot";
+		LOG(INFO) << "Take snapshot Succeed - now we got the snapshot @ " << 
+							snapshot_layout;
 		// TO-DO: under migration, we may need to destroy the enclave
 		//cleanup(client);
 	}
@@ -467,7 +517,7 @@ void EnclaveManager::TakeSnapshot() {
 	if (!s.ok()) {
 		LOG(QFATAL) << "@source TransferSecureSnapshotKey failed: " << s;
 	} else {
-		LOG(INFO) << "@source TansferSecureSnapshotKey " << s;
+		LOG(INFO) << "@source TansferSecureSnapshotKey succeed" << s;
 	}
 
 	} // end for
@@ -499,6 +549,10 @@ void EnclaveManager::SuspendClients() {
 }
 
 void EnclaveManager::__asylo_sig_mig_resume(int signo) {
+	sigset_t sigset;
+	sigemptyset( &sigset );
+	sigaddset( &sigset, SIGUSR1 );
+	sigprocmask( SIG_BLOCK, & sigset, NULL );
 	std::cout << "===  sig_mig_resume  ===" << std::endl;
   auto manager_result = EnclaveManager::Instance();
   if (!manager_result.ok()) {
@@ -507,9 +561,10 @@ void EnclaveManager::__asylo_sig_mig_resume(int signo) {
   }
   EnclaveManager *manager = manager_result.ValueOrDie();
 	manager->ReloadEnclaves();
+	sigprocmask( SIG_UNBLOCK, & sigset, NULL );
 }
 
-void EnclaveManager::ReloadEnclaves() {
+Status EnclaveManager::ReloadEnclaves() {
 	// After the migration,
 	// 1. check aesmd is ready
 	// 2. reload the enclave
@@ -518,7 +573,7 @@ void EnclaveManager::ReloadEnclaves() {
 	Status s;
 	// check the aesmd status
 	FILE *fp_aesmd = NULL;
-	char buff_aesmd[2];
+	char buff_aesmd[2] = "0";
 	while (1) {
 		fp_aesmd = popen("/usr/script/aesmd_check.sh", "r");
 		if (fp_aesmd == NULL) {
@@ -526,35 +581,60 @@ void EnclaveManager::ReloadEnclaves() {
 			break;
 		}
 		fgets(buff_aesmd, 2, fp_aesmd);
-		fclose(fp_aesmd);
+		pclose(fp_aesmd);
 
-		if (strcmp(buff_aesmd, "1"))
+		if (strcmp(buff_aesmd, "1")) {
 			LOG(INFO) << "waiting for aesmd restart...";
-		else {
+			usleep (70000);
+		} else {
 			LOG(INFO) << "aesmd is restarted & ready";
 			break;
 		}
 	}
-	usleep (70000);
+	LOG(INFO) << "reloading enclave";
 
 	// Reload enclaves
 	for (const auto & c : client_by_name_) {
 		// for all clients;
-		auto * client  = reinterpret_cast<asylo::GenericEnclaveClient *>(
+		absl::string_view name = c.first;
+		auto * old_client  = reinterpret_cast<asylo::GenericEnclaveClient *>(
 			this->GetClient(c.first));
+		auto snapshot_ = snapshot_by_client_.find(old_client);
+		SnapshotLayout *playout = snapshot_->second;
 
-		auto config = load_config_by_client_.find(client);
-		//ReloadEnclave(c.first, client, config->second);
+		auto config_ = load_config_by_client_.find(old_client);
+		EnclaveConfig config;
+		EnclaveLoadConfig load_config = config_->second;
+		config = load_config.config();
 
+  void *base_address = nullptr;
+  if (load_config.HasExtension(sgx_load_config)) {
+    SgxLoadConfig sgx_config = load_config.GetExtension(sgx_load_config);
+    if (sgx_config.has_fork_config()) {
+      SgxLoadConfig::ForkConfig fork_config = sgx_config.fork_config();
+      base_address = reinterpret_cast<void *>(fork_config.base_address());
+    } else {
+			LOG(INFO) << "sgx_load_config has no fork_config" ;
+			LOG(INFO) << "sgx_load_config.base_address " << base_address;
+		}
+  } else {
+		LOG(INFO) << "load_config has no sgx_load_config";
+	}
+
+		ReloadEnclave(name, old_client, load_config);
+
+		auto *client_ = reinterpret_cast<asylo::GenericEnclaveClient *>(
+									this->GetClient(name));
 		std::shared_ptr<asylo::primitives::SgxEnclaveClient> sgx_client =
 			std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
-				client->GetPrimitiveClient());
+				client_->GetPrimitiveClient());
 
-		auto result = snapshot_by_client_.find(client);
-		SnapshotLayout *playout = result->second;
 		asylo::ForkHandshakeConfig fconfig;
 		fconfig.set_is_parent(false);
 		fconfig.set_socket(0);
+		sgx_client->InitiateMigration();
+
+		LOG(INFO) << "EnterAndTransferSecureSnapshotKey";
 		s = sgx_client->EnterAndTransferSecureSnapshotKey(fconfig);
 		if (!s.ok()) {
 			LOG(QFATAL) << "@target TransferSecureSnapshotKey failed: " << s;
@@ -562,11 +642,13 @@ void EnclaveManager::ReloadEnclaves() {
 			LOG(INFO) << "@target TransferSecureSnapshotKey ( " << playout << " ) " << s;
 		}
 
+		LOG(INFO) << "Restore enclave from snapshot @ " << playout;
 		s = sgx_client->EnterAndRestore(*playout);
 		if (!s.ok()) {
 			LOG(QFATAL) << "Restore Enclave failed: " << s;
 		} else {
-			LOG(INFO) << "Restore Enclave " << s;
+			LOG(INFO) << "Restore Enclave from snapshot @ " << 
+									&playout;
 		}
 	}
 }

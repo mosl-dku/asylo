@@ -74,6 +74,7 @@ class SgxEnclaveClient : public Client {
   // destruction. Enclave destruction fails if the user defined enclave
   // finalization function fails.
   Status Destroy() override;
+  Status DestroyEnclaveMemory(bool reload, void *, size_t);
 
   // Registers exit handlers that are specific to SGX, for example, handler for
   // thread creation.

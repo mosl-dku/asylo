@@ -289,6 +289,15 @@ StatusOr<std::shared_ptr<Client>> SgxEmbeddedBackend::Load(
   return client;
 }
 
+Status SgxEnclaveClient::DestroyEnclaveMemory(
+					bool reload, void *base_address, size_t enclave_size) {
+	LOG(INFO) << "Destroying sgx enclave " ;
+	if (reload) 
+		munmap(base_address, enclave_size);
+	else return Destroy();
+  return Status::OkStatus();
+}
+
 Status SgxEnclaveClient::Destroy() {
   MessageReader output;
   ASYLO_RETURN_IF_ERROR(EnclaveCall(kSelectorAsyloFini, nullptr, &output));
@@ -298,6 +307,7 @@ Status SgxEnclaveClient::Destroy() {
     return Status(status, "Failed to destroy enclave");
   }
   is_destroyed_ = true;
+
   ASYLO_RETURN_IF_ERROR(
       EnclaveSignalDispatcher::GetInstance()->DeregisterAllSignalsForClient(
           this));

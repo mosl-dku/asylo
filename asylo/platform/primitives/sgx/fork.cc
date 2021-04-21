@@ -114,6 +114,7 @@ int Restore(const char *snapshot_layout, size_t snapshot_layout_len,
   int ret = status_serializer.Serialize(status);
 
   if (!status.ok()) {
+		LOG(INFO) << "RestoreForFork failed: " << status ;
     // Delete instance of the global memory pool singleton freeing all memory
     // held by the pool.
     delete UntrustedCacheMalloc::Instance();
@@ -129,7 +130,9 @@ int Restore(const char *snapshot_layout, size_t snapshot_layout_len,
     // thread will be blocked from re-entering the enclave as well.
     enc_reject_entries();
     enc_unblock_entries();
-  }
+  } else {
+		LOG(INFO) << "RestoreForFork succeed ";
+	}
   return ret;
 }
 

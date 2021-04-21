@@ -278,7 +278,7 @@ private:
 	static void __asylo_sig_mig_resume(int signo);
 	void SuspendClients();
 	void TakeSnapshot();
-	void ReloadEnclaves();
+	Status ReloadEnclaves();
 
 	Status ReloadEnclave(absl::string_view name, EnclaveClient * client, EnclaveLoadConfig config);
 

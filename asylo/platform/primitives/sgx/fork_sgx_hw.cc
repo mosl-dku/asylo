@@ -681,10 +681,13 @@ Status RestoreForFork(const char *input, size_t input_len) {
     Status status = DecryptAndRestoreEnclaveDataBssHeap(
         snapshot_layout, enclave_layout, snapshot_key);
     if (!status.ok()) {
+			LOG(INFO) << "DecryptAndRestoreEnclaveDataBssHeap failed: " << status;
       CopyNonOkStatus(status, &error_code, error_message,
                       ABSL_ARRAYSIZE(error_message));
       break;
-    }
+    } else {
+			LOG(INFO) << "DecryptAndRestoreEnclaveDataBssHeap succeed" ;
+		}
   
     // migration do not restore thread stacks
     if (!migration_requested) {
@@ -693,10 +696,13 @@ Status RestoreForFork(const char *input, size_t input_len) {
 		// information and stack.
 		  status = DecryptAndRestoreThreadStack(snapshot_layout, snapshot_key);
 		  if (!status.ok()) {
+				LOG(INFO) << "DecryptAndRestoreThreadStack failed: " << status;
 		    CopyNonOkStatus(status, &error_code, error_message,
 					              ABSL_ARRAYSIZE(error_message));
 		    break;
-		  }
+		  } else {
+				LOG(INFO) << "DecryptAndRestoreThreadStack succeed";
+			}
     }
   } while (0);
 
@@ -859,6 +865,7 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
   int fd = enc_untrusted_open("/tmp/enc_snap_key", flag, mode);
   enc_untrusted_write(fd, encrypted_snapshot_key_string.data(),
 						  encrypted_snapshot_key_string.size());
+	LOG(INFO) << "encrypted snapshot key: " << encrypted_snapshot_key_string ;
   enc_untrusted_close(fd);
   return Status::OkStatus();
 }
@@ -885,6 +892,13 @@ Status ReceiveSnapshotKey(std::unique_ptr<AeadCryptor> cryptor, int socket) {
     return Status(error::GoogleError::INTERNAL,
                   "Failed to parse EncryptedSnapshotKey");
   }
+  std::string encrypted_snapshot_key_string;
+  if (!encrypted_snapshot_key.SerializeToString(
+          &encrypted_snapshot_key_string)) {
+    return Status(error::GoogleError::INTERNAL,
+                  "Failed to serialize EncryptedSnapshotKey");
+  }
+	LOG(INFO) << "encrypted snapshot key: " << encrypted_snapshot_key_string;
 
   // Decrypts the snapshot key.
   ByteContainerView associated_data(kSnapshotKeyAssociatedDataBuf,
@@ -940,7 +954,9 @@ Status TransferSecureSnapshotKey(
 
   std::unique_ptr<AeadCryptor> cryptor;
   // TODO: Run Ekep at migration
+	LOG(INFO) << "Run Ekep @ migration";
   if (!migration_requested) {
+	LOG(INFO) << " we're in fork(), not migration ";
   // The parent should only start a key transfer if it's requested by a fork
   // request inside an enclave.
   if (is_parent && !ClearSnapshotKeyTransferRequested()) {
@@ -980,6 +996,7 @@ Status TransferSecureSnapshotKey(
     ASYLO_ASSIGN_OR_RETURN(cryptor,
                           AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
   } else {
+		LOG(INFO) << " we're in migration, not fork()";
     // migration case
     CleansingVector<uint8_t> record_protocol_key(kSnapshotKeySize);
     long long val  = 0x11;
@@ -987,11 +1004,13 @@ Status TransferSecureSnapshotKey(
       ASYLO_ASSIGN_OR_RETURN(cryptor,
                           AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
   }
-  
+ 
   if (is_parent) {
+		LOG(INFO) << "EncryptSnapshotKey"; 
     return EncryptAndSendSnapshotKey(std::move(cryptor),
                                      fork_handshake_config.socket());
   } else {
+		LOG(INFO) << "ReceiveSnapshotKey"; 
     return ReceiveSnapshotKey(std::move(cryptor),
                               fork_handshake_config.socket());
   }
