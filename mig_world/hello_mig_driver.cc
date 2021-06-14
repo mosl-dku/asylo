@@ -80,7 +80,7 @@ void initiate_enclave(int signo)
 			char buff_aesmd[2];
 			FILE *fp_aesmd;
 			while(1){
-				fp_aesmd = popen("/home/vsgx_v0.5.2/aesmd_check.sh", "r");
+				fp_aesmd = popen("/usr/script/aesmd_check.sh", "r");
 				if(fp_aesmd == NULL){
 					LOG(FATAL) << "popen failed";
 					break;
