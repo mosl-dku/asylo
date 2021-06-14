@@ -82,9 +82,10 @@ int main(int argc, char *argv[]) {
 
   // Part 2: Secure execution
 
-  asylo::EnclaveClient *client = manager->GetClient("hello_enclave");
-
+	asylo::EnclaveClient *client;
   for (const auto &name : names) {
+		client = manager->GetClient("hello_enclave");
+
     asylo::EnclaveInput input;
     input.MutableExtension(hello_world::enclave_input_hello)
         ->set_to_greet(name);
@@ -92,7 +93,9 @@ int main(int argc, char *argv[]) {
     asylo::EnclaveOutput output;
     status = client->EnterAndRun(input, &output);
     if (!status.ok()) {
-      LOG(QFATAL) << "EnterAndRun failed: " << status;
+      LOG(INFO) << "EnterAndRun failed: " << status;
+			sleep(3);
+			continue;
     }
 
     if (!output.HasExtension(hello_world::enclave_output_hello)) {
