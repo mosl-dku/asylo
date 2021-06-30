@@ -40,6 +40,7 @@
 #include "asylo/platform/primitives/util/message.h"
 #include "asylo/util/status.h"  // IWYU pragma: export
 #include "asylo/util/statusor.h"
+#include "signal.h"
 
 namespace asylo {
 class EnclaveLoader;
@@ -275,6 +276,9 @@ class EnclaveManager {
 
   // Singleton instance of this class.
   static EnclaveManager *instance_ ABSL_GUARDED_BY(mu_);
+
+	static void __asylo_sig_mig_suspend(int signo);
+	void TakeSnapshot();
 };
 
 /// An abstract enclave loader.

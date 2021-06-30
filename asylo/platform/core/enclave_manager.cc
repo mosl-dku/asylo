@@ -90,6 +90,10 @@ EnclaveManager::EnclaveManager() {
   if (!rc.ok()) {
     LOG(FATAL) << "Could not register realtime clock resource.";
   }
+
+	struct sigaction suspend_sa;
+	suspend_sa.sa_handler = EnclaveManager::__asylo_sig_mig_suspend;
+	sigaction(SIGUSR2, &suspend_sa, NULL);
 }
 
 Status EnclaveManager::DestroyEnclave(EnclaveClient *client,
@@ -416,6 +420,32 @@ primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,
       manager->GetClient(enclave_name));
   auto primitive_client = client->GetPrimitiveClient();
   return primitive_client.get();
+}
+
+void EnclaveManager::__asylo_sig_mig_suspend(int signo) {
+	// Take Snapshot & save the snapshot layout
+	auto mgr_ = EnclaveManager::Instance();
+
+	EnclaveManager *mgr =	mgr_.value();
+	mgr->TakeSnapshot();
+	return ;
+}
+
+void EnclaveManager::TakeSnapshot() {
+	//TakeSnapshot for All Clients
+	for (auto& e : client_by_name_) {
+		SnapshotLayout snapshot_layout_;
+		std::string cli_name = e.first;
+		auto *client = dynamic_cast<asylo::GenericEnclaveClient *>(GetClient(cli_name));
+		auto p_client =
+        std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
+            client->GetPrimitiveClient());
+		p_client->EnterAndTakeSnapshot(&snapshot_layout_);
+		snapshot_layout_by_client_.emplace(client, snapshot_layout_);
+		LOG(INFO) << "snapshot_layout@ " << &snapshot_layout_ << " cli_name: " << cli_name;
+	}
+
+	return;
 }
 
 };  // namespace asylo
