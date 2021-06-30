@@ -139,6 +139,18 @@ const absl::string_view EnclaveManager::GetName(
   }
 }
 
+SnapshotLayout EnclaveManager::GetSnapshotLayoutFromClient(
+		EnclaveClient *client) {
+  absl::ReaderMutexLock lock(&client_table_lock_);
+  if (!client ||
+      snapshot_layout_by_client_.find(client) == snapshot_layout_by_client_.end()) {
+		SnapshotLayout nullLayout;
+    return nullLayout;
+  }
+  return snapshot_layout_by_client_[client];
+
+}
+
 EnclaveLoadConfig EnclaveManager::GetLoadConfigFromClient(
     EnclaveClient *client) {
   absl::ReaderMutexLock lock(&client_table_lock_);
@@ -345,6 +357,7 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
       client_by_name_.erase(name);
       name_by_client_.erase(client);
       load_config_by_client_.erase(client);
+      snapshot_layout_by_client_.erase(client);
     }
   }
   return status;
@@ -355,6 +368,7 @@ void EnclaveManager::RemoveEnclaveReference(absl::string_view name) {
   EnclaveClient *client = client_by_name_[name].get();
   client_by_name_.erase(name);
   name_by_client_.erase(client);
+	snapshot_layout_by_client_.erase(client);
 }
 
 primitives::Client *LoadEnclaveInChildProcess(absl::string_view enclave_name,

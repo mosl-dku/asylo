@@ -43,6 +43,7 @@
 
 namespace asylo {
 class EnclaveLoader;
+class SnapshotLayout;
 
 /// Enclave Manager configuration.
 /// \deprecated EnclaveManager no longer needs to be configured.
@@ -220,6 +221,10 @@ class EnclaveManager {
   EnclaveLoadConfig GetLoadConfigFromClient(EnclaveClient *client)
       ABSL_LOCKS_EXCLUDED(client_table_lock_);
 
+	/// Get the snapshot layout of an enclave. This should be only available during suspend/resume
+	SnapshotLayout GetSnapshotLayoutFromClient(EnclaveClient *client)
+      ABSL_LOCKS_EXCLUDED(client_table_lock_);
+
  private:
   EnclaveManager() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
   EnclaveManager(EnclaveManager const &) = delete;
@@ -261,6 +266,9 @@ class EnclaveManager {
 
   absl::flat_hash_map<const EnclaveClient *, EnclaveLoadConfig>
       load_config_by_client_ ABSL_GUARDED_BY(client_table_lock_);
+
+	absl::flat_hash_map<const EnclaveClient *, SnapshotLayout>
+			snapshot_layout_by_client_ ABSL_GUARDED_BY(client_table_lock_);
 
   // Mutex guarding the static state of this class.
   static absl::Mutex mu_;
