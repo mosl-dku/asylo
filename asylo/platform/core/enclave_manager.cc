@@ -430,6 +430,11 @@ void EnclaveManager::__asylo_sig_mig_suspend(int signo) {
 
 	EnclaveManager *mgr =	mgr_.value();
 	mgr->Suspend();
+
+	struct sigaction suspend_sa;
+	suspend_sa.sa_handler = EnclaveManager::__asylo_sig_mig_suspend;
+	sigaction(SIGUSR2, &suspend_sa, NULL);
+
 	return ;
 }
 
@@ -467,6 +472,10 @@ void EnclaveManager::__asylo_sig_mig_resume(int signo) {
 
 	EnclaveManager *mgr =	mgr_.value();
 	mgr->Resume();
+
+	struct sigaction resume_sa;
+	resume_sa.sa_handler = EnclaveManager::__asylo_sig_mig_resume;
+	sigaction(SIGUSR1, &resume_sa, NULL);
 	return ;
 }
 
