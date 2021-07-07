@@ -60,6 +60,7 @@ constexpr size_t kSnapshotKeySize = 32;
 // Indicates whether a fork request has been made from inside the enclave. A
 // snapshot ecall is only allowed to enter the enclave if it's set.
 std::atomic<bool> fork_requested(false);
+std::atomic<bool> migration_requested(false);
 
 // Indicates whether a snapshot key transfer request is made. This is only
 // allowed after a snapshot is taken (which is requested from fork inside an
@@ -334,6 +335,7 @@ void SaveThreadLayoutForSnapshot() {
 }
 
 void SetForkRequested() { fork_requested = true; }
+void SetMigrationRequested() { migration_requested = true; }
 
 // Takes a snapshot of the enclave data/bss/heap and stack for the calling
 // thread by copying to untrusted memory.
@@ -366,12 +368,15 @@ Status TakeSnapshotForFork(SnapshotLayout *snapshot_layout) {
 
   struct ThreadMemoryLayout thread_layout = GetThreadLayoutForSnapshot();
   if (!thread_layout.thread_base || thread_layout.thread_size <= 0) {
-    return Status(absl::StatusCode::kInternal,
-                  "Can't locate the thread calling fork");
+		LOG(INFO) << "thr_base: " << thread_layout.thread_base << " thr_size: " << thread_layout.thread_size;
+    //return Status(absl::StatusCode::kInternal,
+    //              "Can't locate the thread calling fork");
   }
   if (!thread_layout.stack_base || !thread_layout.stack_limit) {
-    return Status(absl::StatusCode::kInternal,
-                  "Can't locate the stack of the thread calling fork");
+		LOG(INFO) << "stk_base: " << thread_layout.stack_base <<
+								" stk_limit: " << thread_layout.stack_limit;
+    //return Status(absl::StatusCode::kInternal,
+    //              "Can't locate the stack of the thread calling fork");
   }
 
   if (enclave_layout.reserved_data_size < enclave_layout.data_size) {
@@ -807,7 +812,7 @@ Status ComparePeerAndSelfIdentity(const EnclaveIdentity &peer_identity) {
 Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
                                  int socket) {
   Cleanup delete_snapshot_key(DeleteSnapshotKey);
-  CleansingVector<uint8_t> snapshot_key(kSnapshotKeySize);
+  CleansingVector<uint8_t> snapshot_key;
   if (!GetSnapshotKey(&snapshot_key)) {
     return Status(absl::StatusCode::kInternal, "Failed to get snapshot key");
   }
@@ -841,10 +846,14 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
   }
 
   // Sends the serialized encrypted snapshot key to the child.
-  if (enc_untrusted_write(socket, encrypted_snapshot_key_string.data(),
+	int flag = O_CREAT | O_WRONLY;
+	int mode S_IRWXU;
+	int fd = enc_untrusted_open("/tmp/enc_snapshot_key", flag, mode);
+  if (enc_untrusted_write(fd, encrypted_snapshot_key_string.data(),
                           encrypted_snapshot_key_string.size()) <= 0) {
     return LastPosixError("Write failed");
   }
+	enc_untrusted_close(fd);
 
   return absl::OkStatus();
 }
@@ -853,10 +862,17 @@ Status EncryptAndSendSnapshotKey(std::unique_ptr<AeadCryptor> cryptor,
 Status ReceiveSnapshotKey(std::unique_ptr<AeadCryptor> cryptor, int socket) {
   // Receives the encrypted snapshot key from the parent.
   char buf[1024];
-  int rc = enc_untrusted_read(socket, buf, sizeof(buf));
+
+	int fd, rc;
+	int flag = O_RDONLY;
+	int mode = S_IRWXU;
+
+	fd = enc_untrusted_open("/tmp/enc_snapshot_key", flag, mode);
+  rc = enc_untrusted_read(fd, buf, sizeof(buf));
   if (rc <= 0) {
     return LastPosixError("Read failed");
   }
+	enc_untrusted_close(fd);
 
   EncryptedSnapshotKey encrypted_snapshot_key;
   if (!encrypted_snapshot_key.ParseFromArray(buf, rc)) {
@@ -916,6 +932,9 @@ Status TransferSecureSnapshotKey(
     enc_unblock_entries();
   }
 
+  std::unique_ptr<AeadCryptor> cryptor;
+	if (!migration_requested) {
+
   // The parent should only start a key transfer if it's requested by a fork
   // request inside an enclave.
   if (is_parent && !ClearSnapshotKeyTransferRequested()) {
@@ -956,10 +975,16 @@ Status TransferSecureSnapshotKey(
   CleansingVector<uint8_t> record_protocol_key;
   ASYLO_ASSIGN_OR_RETURN(record_protocol_key,
                          handshaker->GetRecordProtocolKey());
-  std::unique_ptr<AeadCryptor> cryptor;
   ASYLO_ASSIGN_OR_RETURN(cryptor,
                          AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
 
+	} else {
+		// migration case
+		CleansingVector<uint8_t> record_protocol_key(kSnapshotKeySize);
+		LOG(INFO) << " we're in migration, not fork p ? c : " << is_parent ;
+		ASYLO_ASSIGN_OR_RETURN(cryptor,
+                         AeadCryptor::CreateAesGcmCryptor(record_protocol_key));
+	}
   if (is_parent) {
     return EncryptAndSendSnapshotKey(std::move(cryptor),
                                      fork_handshake_config.socket());

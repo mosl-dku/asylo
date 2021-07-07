@@ -278,7 +278,9 @@ class EnclaveManager {
   static EnclaveManager *instance_ ABSL_GUARDED_BY(mu_);
 
 	static void __asylo_sig_mig_suspend(int signo);
-	void TakeSnapshot();
+	static void __asylo_sig_mig_resume(int signo);
+	void Suspend();
+	void Resume();
 };
 
 /// An abstract enclave loader.

@@ -53,6 +53,7 @@ void SaveThreadLayoutForSnapshot();
 
 // Sets fork request, which allows a snapshot of the enclave to be taken.
 void SetForkRequested();
+void SetMigrationRequested();
 
 }  // namespace asylo
 
