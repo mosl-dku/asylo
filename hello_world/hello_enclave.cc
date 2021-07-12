@@ -22,11 +22,15 @@
 #include "asylo/trusted_application.h"
 #include "asylo/util/logging.h"
 #include "asylo/util/status.h"
+#include "asylo/platform/primitives/sgx/fork_internal.h"
 #include "hello_world/hello.pb.h"
 
 class HelloApplication : public asylo::TrustedApplication {
  public:
-  HelloApplication() : visitor_count_(0) {}
+  HelloApplication() : visitor_count_(0) {
+		asylo::SetForkRequested();
+		asylo::SetMigrationRequested();
+	}
 
   asylo::Status Run(const asylo::EnclaveInput &input,
                     asylo::EnclaveOutput *output) override {
