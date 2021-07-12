@@ -320,6 +320,7 @@ Status EnclaveManager::LoadEnclave(const EnclaveLoadConfig &load_config) {
   {
     absl::ReaderMutexLock lock(&client_table_lock_);
     if (client_by_name_.find(name) != client_by_name_.end()) {
+			client_by_name_.erase(name);
       Status status =
           absl::AlreadyExistsError(absl::StrCat("Name already exists: ", name));
       LOG(ERROR) << "LoadEnclave failed: " << status;
@@ -480,6 +481,7 @@ void EnclaveManager::__asylo_sig_mig_resume(int signo) {
 }
 
 void EnclaveManager::Resume() {
+	Status s;
 	//TakeSnapshot for All Clients
 	for (auto& e : client_by_name_) {
 		SnapshotLayout snapshot_layout_;
@@ -488,12 +490,33 @@ void EnclaveManager::Resume() {
 		auto p_client =
         std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
             client->GetPrimitiveClient());
+
+		// Reload the encl.
 		snapshot_layout_ = snapshot_layout_by_client_[client];
+		auto conf = load_config_by_client_[client];
+		/* reload base_address, size  */
+		void *base_address = p_client->GetBaseAddress();
+		size_t enc_sz = p_client->GetEnclaveSize();
+		if (conf.HasExtension(sgx_load_config)) {
+			SgxLoadConfig sgx_config = conf.GetExtension(sgx_load_config);
+
+			SgxLoadConfig::ForkConfig fconfig;
+			fconfig.set_base_address( reinterpret_cast<uint64_t> (base_address));
+			fconfig.set_enclave_size(enc_sz);
+			*sgx_config.mutable_fork_config() = fconfig;
+			*conf.MutableExtension(asylo::sgx_load_config) = sgx_config;
+		}
+		s = LoadEnclave(conf);
+		if (!s.ok()) LOG(INFO) << "LoadEnclave: " << s;
+		client = dynamic_cast<asylo::GenericEnclaveClient *>(GetClient(cli_name));
+		p_client =
+        std::static_pointer_cast<asylo::primitives::SgxEnclaveClient>(
+            client->GetPrimitiveClient());
 
 		asylo::ForkHandshakeConfig f;
 		f.set_is_parent(false);
 		f.set_socket(0);
-		Status s = p_client->EnterAndTransferSecureSnapshotKey(f);
+		s = p_client->EnterAndTransferSecureSnapshotKey(f);
 		if (!s.ok()) LOG(INFO) << "EnterAndTransferSecureSnapshotKey: " << s;
 		s = p_client->EnterAndRestore(snapshot_layout_);
 		if (!s.ok()) LOG(INFO) << "EnterAndRestore: " << s;
